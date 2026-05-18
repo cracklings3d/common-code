@@ -26,6 +26,8 @@ class CommonCodeDesktopApp extends StatelessWidget {
 
 abstract interface class DesktopSessionLoader {
   Future<DesktopSessionSnapshot?> load();
+
+  Future<DesktopSessionSnapshot> submitTurn({required String submittedText});
 }
 
 final class DesktopSessionSnapshot {
@@ -72,6 +74,26 @@ final class DesktopHostSessionLoader implements DesktopSessionLoader {
       attachedClientId: _attachedClientId,
     );
   }
+
+  @override
+  Future<DesktopSessionSnapshot> submitTurn({required String submittedText}) async {
+    final service = _service ??= _hostService ?? createInMemoryHostService();
+
+    if (!_isBootstrapped) {
+      await load();
+    }
+
+    final session = service.submitTurn(
+      sessionId: _sessionId,
+      client: const Client(id: _attachedClientId),
+      submittedText: submittedText,
+    );
+
+    return DesktopSessionSnapshot(
+      session: session,
+      attachedClientId: _attachedClientId,
+    );
+  }
 }
 
 class SessionScreen extends StatefulWidget {
@@ -85,6 +107,8 @@ class SessionScreen extends StatefulWidget {
 
 class _SessionScreenState extends State<SessionScreen> {
   SessionScreenState _state = const SessionScreenLoading();
+  final TextEditingController _draftController = TextEditingController();
+  bool _isSubmitting = false;
 
   @override
   void initState() {
@@ -120,6 +144,48 @@ class _SessionScreenState extends State<SessionScreen> {
     }
   }
 
+  Future<void> _submitTurn() async {
+    final draftText = _draftController.text;
+
+    setState(() {
+      _isSubmitting = true;
+    });
+
+    try {
+      final snapshot = await widget.sessionLoader.submitTurn(
+        submittedText: draftText,
+      );
+      if (!mounted) {
+        return;
+      }
+
+      setState(() {
+        _draftController.clear();
+        _state = SessionScreenData(snapshot);
+      });
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+
+      setState(() {
+        _state = SessionScreenError(error.toString());
+      });
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isSubmitting = false;
+        });
+      }
+    }
+  }
+
+  @override
+  void dispose() {
+    _draftController.dispose();
+    super.dispose();
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -128,10 +194,10 @@ class _SessionScreenState extends State<SessionScreen> {
         title: const Text('CommonCode Desktop'),
       ),
       body: Center(
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 480),
-          child: Padding(
-            padding: const EdgeInsets.all(24),
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.all(24),
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 480),
             child: switch (_state) {
               SessionScreenLoading() => const _SessionLoadingView(),
               SessionScreenEmpty() => _SessionEmptyView(
@@ -143,7 +209,10 @@ class _SessionScreenState extends State<SessionScreen> {
               ),
               SessionScreenData(:final snapshot) => _SessionDataView(
                 snapshot: snapshot,
+                draftController: _draftController,
                 onRefresh: _loadSession,
+                onSubmitTurn: _submitTurn,
+                isSubmitting: _isSubmitting,
               ),
             },
           ),
@@ -239,16 +308,26 @@ class _SessionErrorView extends StatelessWidget {
 }
 
 class _SessionDataView extends StatelessWidget {
-  const _SessionDataView({required this.snapshot, required this.onRefresh});
+  const _SessionDataView({
+    required this.snapshot,
+    required this.draftController,
+    required this.onRefresh,
+    required this.onSubmitTurn,
+    required this.isSubmitting,
+  });
 
   final DesktopSessionSnapshot snapshot;
+  final TextEditingController draftController;
   final Future<void> Function() onRefresh;
+  final Future<void> Function() onSubmitTurn;
+  final bool isSubmitting;
 
   @override
   Widget build(BuildContext context) {
     final session = snapshot.session;
     final inputClientId = session.inputClient?.id ?? 'none';
     final activeTurnId = session.activeTurn?.id ?? 'none';
+    final hasActiveTurn = session.activeTurn != null;
 
     return _SessionSection(
       title: 'Live Session state',
@@ -264,6 +343,39 @@ class _SessionDataView extends StatelessWidget {
         Text('Prompt Thread turns: ${session.promptThread.turns.length}'),
         const SizedBox(height: 8),
         Text('Active Turn: $activeTurnId'),
+        if (session.promptThread.turns.isNotEmpty) ...[
+          const SizedBox(height: 16),
+          Text('Prompt Thread', style: Theme.of(context).textTheme.titleMedium),
+          const SizedBox(height: 8),
+          for (final turn in session.promptThread.turns) ...[
+            Text('Turn ${turn.id}: ${turn.submittedText}'),
+            const SizedBox(height: 8),
+          ],
+        ],
+        const SizedBox(height: 16),
+        if (!hasActiveTurn) ...[
+          TextField(
+            controller: draftController,
+            decoration: const InputDecoration(
+              labelText: 'Next Turn',
+              border: OutlineInputBorder(),
+            ),
+            maxLines: 3,
+          ),
+          const SizedBox(height: 12),
+          FilledButton(
+            onPressed: isSubmitting
+                ? null
+                : () {
+                    onSubmitTurn();
+                  },
+            child: Text(isSubmitting ? 'Submitting...' : 'Submit Turn'),
+          ),
+        ] else ...[
+          const Text(
+            'Turn authoring is unavailable while the current active Turn remains in progress.',
+          ),
+        ],
         const SizedBox(height: 16),
         FilledButton(
           onPressed: () {

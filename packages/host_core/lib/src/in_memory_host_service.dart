@@ -31,6 +31,22 @@ final class _InMemoryHostService implements HostService {
   }
 
   @override
+  Session submitTurn({
+    required String sessionId,
+    required Client client,
+    required String submittedText,
+  }) {
+    final session = _readStoredSession(sessionId);
+    final updatedSession = session.startTurn(
+      turnId: _nextTurnId(session),
+      client: client,
+      submittedText: submittedText,
+    );
+    _sessionsById[sessionId] = updatedSession;
+    return updatedSession;
+  }
+
+  @override
   Session readSession(String sessionId) => _readStoredSession(sessionId);
 
   Session _readStoredSession(String sessionId) {
@@ -44,4 +60,6 @@ final class _InMemoryHostService implements HostService {
 
     return session;
   }
+
+  String _nextTurnId(Session session) => 'turn-${session.promptThread.turns.length + 1}';
 }

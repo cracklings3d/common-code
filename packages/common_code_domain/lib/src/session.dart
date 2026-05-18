@@ -57,7 +57,11 @@ final class Session {
     );
   }
 
-  Session startTurn({required String turnId, required Client client}) {
+  Session startTurn({
+    required String turnId,
+    required Client client,
+    required String submittedText,
+  }) {
     if (activeTurn != null) {
       throw const SessionFailure(
         SessionFailureCode.activeTurnAlreadyExists,
@@ -77,7 +81,11 @@ final class Session {
       activeHost: activeHost,
       clients: clients,
       promptThread: promptThread.append(
-        Turn.active(id: turnId, clientId: client.id),
+        Turn.active(
+          id: turnId,
+          clientId: client.id,
+          submittedText: submittedText,
+        ),
       ),
     );
   }

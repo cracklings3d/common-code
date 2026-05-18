@@ -5,5 +5,11 @@ abstract interface class HostService {
 
   Session attachClient({required String sessionId, required Client client});
 
+  Session submitTurn({
+    required String sessionId,
+    required Client client,
+    required String submittedText,
+  });
+
   Session readSession(String sessionId);
 }

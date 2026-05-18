@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:common_code_desktop/main.dart';
 import 'package:common_code_domain/common_code_domain.dart';
+import 'package:flutter/material.dart' show TextField;
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
@@ -21,6 +22,8 @@ void main() {
     expect(find.text('Input Client: none'), findsOneWidget);
     expect(find.text('Prompt Thread turns: 0'), findsOneWidget);
     expect(find.text('Active Turn: none'), findsOneWidget);
+    expect(find.widgetWithText(TextField, 'Next Turn'), findsOneWidget);
+    expect(find.text('Submit Turn'), findsOneWidget);
   });
 
   testWidgets('loading state is visible before the screen settles', (
@@ -122,6 +125,36 @@ void main() {
     expect(find.text('Input Client: desktop-client'), findsOneWidget);
     expect(find.text('Prompt Thread turns: 1'), findsOneWidget);
     expect(find.text('Active Turn: turn-1'), findsOneWidget);
+    expect(
+      find.text(
+        'Turn authoring is unavailable while the current active Turn remains in progress.',
+      ),
+      findsOneWidget,
+    );
+  });
+
+  testWidgets('submitting text updates the rendered session snapshot', (
+    WidgetTester tester,
+  ) async {
+    final loader = _RecordingDesktopSessionLoader();
+
+    await tester.pumpWidget(CommonCodeDesktopApp(sessionLoader: loader));
+    await tester.pumpAndSettle();
+
+    await tester.enterText(find.byType(TextField), 'Submit the first desktop turn.');
+    await tester.tap(find.text('Submit Turn'));
+    await tester.pumpAndSettle();
+
+    expect(loader.submittedTexts, ['Submit the first desktop turn.']);
+    expect(find.text('Input Client: desktop-client'), findsOneWidget);
+    expect(find.text('Prompt Thread turns: 1'), findsOneWidget);
+    expect(find.text('Active Turn: turn-1'), findsOneWidget);
+    expect(
+      find.text('Turn turn-1: Submit the first desktop turn.'),
+      findsOneWidget,
+    );
+    expect(find.byType(TextField), findsNothing);
+    expect(find.text('Submit Turn'), findsNothing);
   });
 }
 
@@ -145,7 +178,11 @@ Session _buildActiveTurnSession() {
   return Session(
     id: 'desktop-session',
     activeHost: const Host(id: 'desktop-host'),
-  ).attachClient(client).startTurn(turnId: 'turn-1', client: client);
+  ).attachClient(client).startTurn(
+    turnId: 'turn-1',
+    client: client,
+    submittedText: 'Stored submitted turn',
+  );
 }
 
 final class _FakeDesktopSessionLoader implements DesktopSessionLoader {
@@ -155,4 +192,32 @@ final class _FakeDesktopSessionLoader implements DesktopSessionLoader {
 
   @override
   Future<DesktopSessionSnapshot?> load() => _onLoad();
+
+  @override
+  Future<DesktopSessionSnapshot> submitTurn({required String submittedText}) {
+    throw UnimplementedError('submitTurn is not used in this fake loader.');
+  }
+}
+
+final class _RecordingDesktopSessionLoader implements DesktopSessionLoader {
+  final List<String> submittedTexts = <String>[];
+  DesktopSessionSnapshot _snapshot = _buildSnapshot();
+
+  @override
+  Future<DesktopSessionSnapshot?> load() async => _snapshot;
+
+  @override
+  Future<DesktopSessionSnapshot> submitTurn({required String submittedText}) async {
+    submittedTexts.add(submittedText);
+    _snapshot = DesktopSessionSnapshot(
+      attachedClientId: 'desktop-client',
+      session: _buildBootstrapSession().startTurn(
+        turnId: 'turn-1',
+        client: const Client(id: 'desktop-client'),
+        submittedText: submittedText,
+      ),
+    );
+
+    return _snapshot;
+  }
 }
