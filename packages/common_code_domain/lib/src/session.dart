@@ -41,6 +41,22 @@ final class Session {
     );
   }
 
+  Session attachClient(Client client) {
+    if (_hasAttachedClient(client.id)) {
+      throw SessionFailure(
+        SessionFailureCode.duplicateClientId,
+        'Client ${client.id} is already attached to session $id.',
+      );
+    }
+
+    return Session(
+      id: id,
+      activeHost: activeHost,
+      clients: [...clients, client],
+      promptThread: promptThread,
+    );
+  }
+
   Session startTurn({required String turnId, required Client client}) {
     if (activeTurn != null) {
       throw const SessionFailure(

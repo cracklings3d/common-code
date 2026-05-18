@@ -35,6 +35,50 @@ void main() {
       expect(updatedSession.inputClient, isNull);
     });
 
+    test('attaches a client while preserving the active host', () {
+      final session = Session(id: 'session-1', activeHost: host);
+
+      final updatedSession = session.attachClient(clientA);
+
+      expect(updatedSession.activeHost, host);
+      expect(updatedSession.clients, [clientA]);
+      expect(updatedSession.activeTurn, isNull);
+      expect(updatedSession.inputClient, isNull);
+    });
+
+    test('rejects attaching a duplicate client id to a session', () {
+      final session = Session(
+        id: 'session-1',
+        activeHost: host,
+        clients: const [clientA],
+      );
+
+      expect(
+        () => session.attachClient(clientA),
+        throwsA(
+          isA<SessionFailure>().having(
+            (failure) => failure.code,
+            'code',
+            SessionFailureCode.duplicateClientId,
+          ),
+        ),
+      );
+    });
+
+    test('attaching a non-input client preserves an active turn invariant', () {
+      final session = Session(
+        id: 'session-1',
+        activeHost: host,
+        clients: const [clientA],
+      ).startTurn(turnId: 'turn-1', client: clientA);
+
+      final updatedSession = session.attachClient(clientB);
+
+      expect(updatedSession.activeTurn, session.activeTurn);
+      expect(updatedSession.inputClient, clientA);
+      expect(updatedSession.clients, [clientA, clientB]);
+    });
+
     test(
       'starts a turn from a client and promotes that client to input client',
       () {
@@ -177,10 +221,7 @@ void main() {
     test(
       'retains the temporary compatibility descriptor for scaffold consumers',
       () {
-        expect(
-          commonCodeDomainDescriptor,
-          isA<CommonCodeDomainDescriptor>(),
-        );
+        expect(commonCodeDomainDescriptor, isA<CommonCodeDomainDescriptor>());
         expect(
           commonCodeDomainDescriptor.label,
           'common_code_domain placeholder contract',

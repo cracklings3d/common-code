@@ -1,39 +1,43 @@
-<!-- 
-This README describes the package. If you publish this package to pub.dev,
-this README's contents appear on the landing page for your package.
+# host_core
 
-For information about how to write a good package README, see the guide for
-[writing package pages](https://dart.dev/tools/pub/writing-package-pages). 
+`host_core` exposes the first CommonCode host boundary as a pure Dart, typed,
+in-process service.
 
-For general information about developing packages, see the Dart guide for
-[creating packages](https://dart.dev/guides/libraries/create-packages)
-and the Flutter guide for
-[developing packages and plugins](https://flutter.dev/to/develop-packages). 
--->
+This package is intentionally narrow for issue #3:
 
-TODO: Put a short description of the package here that helps potential users
-know whether this package might be useful for them.
+- create a `Session`
+- attach one `Client`
+- read the current `Session` snapshot
 
-## Features
-
-TODO: List what your package can do. Maybe include images, gifs, or videos.
-
-## Getting started
-
-TODO: List prerequisites and provide or point to information on how to
-start using the package.
+The current implementation is an in-memory desktop-safe path used directly by
+the Flutter desktop app in the same process. It is not the final transport
+architecture and does not introduce networking, IPC, platform channels,
+isolates, or persistence.
 
 ## Usage
 
-TODO: Include short and useful examples for package users. Add longer examples
-to `/example` folder. 
-
 ```dart
-const like = 'sample';
+import 'package:common_code_domain/common_code_domain.dart';
+import 'package:host_core/host_core.dart';
+
+final hostService = createInMemoryHostService();
+
+hostService.createSession(
+  sessionId: 'session-1',
+  activeHost: const Host(id: 'desktop-host'),
+);
+
+hostService.attachClient(
+  sessionId: 'session-1',
+  client: const Client(id: 'desktop-client'),
+);
+
+final session = hostService.readSession('session-1');
 ```
 
-## Additional information
+## Public boundary
 
-TODO: Tell users more about the package: where to find more information, how to 
-contribute to the package, how to file issues, what response they can expect 
-from the package authors, and more.
+- `HostService`
+- `createInMemoryHostService()`
+- `HostServiceFailure`
+- `HostServiceFailureCode`
