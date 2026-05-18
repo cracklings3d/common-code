@@ -1,0 +1,11 @@
+name: common_code_workspace
+description: CommonCode Windows-first Flutter workspace scaffold.
+publish_to: none
+
+environment:
+  sdk: ^3.11.5
+
+workspace:
+  - apps/common_code_desktop
+  - packages/common_code_domain
+  - packages/host_core
