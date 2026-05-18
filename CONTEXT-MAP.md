@@ -8,6 +8,13 @@ CommonCode is a multi-platform continuation layer for OpenCode. It keeps a User'
 - [Execution](./contexts/execution/CONTEXT.md) - binds each Session to one active Host and processes Turns there
 - [Presentation](./contexts/presentation/CONTEXT.md) - defines the configurable amount of UI each Client exposes on each platform
 
+## Current Implementation Direction
+
+- CommonCode will be built issue by issue rather than through a separate MVP phase.
+- Client applications use Flutter so the same client stack can target desktop now and phone support later.
+- The first implementation slices stay narrowly scoped, actionable, and testable, even when they only establish one end-to-end path.
+- Desktop remains the first active client target while the project structure keeps room for later phone clients.
+
 ## Relationships
 
 - **Session Orchestration -> Execution**: a Session binds to one active Host; each Turn is handed to Execution for processing
