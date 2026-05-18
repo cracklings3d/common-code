@@ -10,18 +10,16 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:common_code_desktop/main.dart';
 
 void main() {
-  testWidgets('renders placeholder package wiring', (WidgetTester tester) async {
-    await tester.pumpWidget(const CommonCodeDesktopApp());
+  testWidgets('renders a service-backed session summary', (
+    WidgetTester tester,
+  ) async {
+    await tester.pumpWidget(CommonCodeDesktopApp());
 
-    expect(find.text('CommonCode Desktop Scaffold'), findsOneWidget);
-    expect(find.text('Windows-first Flutter workspace scaffold'), findsOneWidget);
-    expect(
-      find.text('Domain package: common_code_domain placeholder contract'),
-      findsOneWidget,
-    );
-    expect(
-      find.text('Host package: host_core placeholder contract'),
-      findsOneWidget,
-    );
+    expect(find.text('CommonCode Desktop'), findsOneWidget);
+    expect(find.text('Desktop host boundary proof'), findsOneWidget);
+    expect(find.text('Session id: desktop-session'), findsOneWidget);
+    expect(find.text('Active host id: desktop-host'), findsOneWidget);
+    expect(find.text('Attached clients: 1'), findsOneWidget);
+    expect(find.text('Attached client ids: desktop-client'), findsOneWidget);
   });
 }

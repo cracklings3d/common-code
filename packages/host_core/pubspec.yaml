@@ -1,5 +1,5 @@
 name: host_core
-description: Placeholder CommonCode host package for workspace wiring.
+description: In-memory CommonCode host service with a desktop-safe Dart boundary.
 version: 1.0.0
 publish_to: none
 
@@ -9,6 +9,8 @@ environment:
 resolution: workspace
 
 dependencies:
+  common_code_domain:
+    path: ../common_code_domain
 
 dev_dependencies:
   lints: ^6.0.0
