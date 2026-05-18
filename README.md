@@ -1,17 +1,41 @@
 # CommonCode
 
-CommonCode is a multi-platform continuation layer for OpenCode.
+CommonCode is a multi-platform continuation layer for OpenCode. This repository is currently a Windows-first Flutter workspace scaffold that proves the repo shape for one desktop app plus shared Dart packages.
 
-Its goal is to let a user move between clients and platforms without losing continuity. A turn can keep running on a host while the user reconnects from another client, receives notifications there, and continues the same prompt thread from the most appropriate interface for that platform.
+## Workspace layout
 
-## Core Ideas
+```text
+.
+├─ apps/
+│  └─ common_code_desktop/    # Placeholder Flutter desktop app (Windows target active)
+├─ packages/
+│  ├─ common_code_domain/     # Placeholder shared domain package
+│  └─ host_core/              # Placeholder shared host-facing package
+└─ tool/                      # Root orchestration scripts
+```
 
-- Sessions keep work continuous across clients.
-- Hosts process turns independently of the currently active client.
-- Presentation profiles let each platform expose the right amount of UI.
-- Notifications are routed across clients so the next action can happen on the device the user is holding.
+## Current members
 
-## Current Project Docs
+- `apps/common_code_desktop` - minimal Flutter desktop scaffold that imports both shared packages and renders their placeholder values.
+- `packages/common_code_domain` - pure Dart placeholder package for minimal domain-facing exports only.
+- `packages/host_core` - pure Dart placeholder package for minimal host-facing exports only.
+
+## Status
+
+- Windows desktop is the only active launch target in this slice.
+- The shared packages are placeholders only in issue #1.
+- No real session, host lifecycle, persistence, networking, or OpenCode integration exists yet.
+
+## Root commands
+
+Run all commands from the repository root:
+
+- `pwsh -File tool/bootstrap.ps1`
+- `pwsh -File tool/analyze.ps1`
+- `pwsh -File tool/test.ps1`
+- `pwsh -File tool/run_windows.ps1`
+
+## Current project docs
 
 - `CONTEXT-MAP.md`
 - `GLOSSARY.md`
@@ -19,7 +43,3 @@ Its goal is to let a user move between clients and platforms without losing cont
 - `contexts/execution/CONTEXT.md`
 - `contexts/presentation/CONTEXT.md`
 - `docs/adr/`
-
-## Status
-
-The repository is currently in the bootstrap stage. The domain language and a few initial architectural decisions are documented, and implementation will proceed issue by issue.
