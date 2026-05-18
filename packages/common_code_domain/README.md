@@ -1,39 +1,60 @@
-<!-- 
-This README describes the package. If you publish this package to pub.dev,
-this README's contents appear on the landing page for your package.
+# common_code_domain
 
-For information about how to write a good package README, see the guide for
-[writing package pages](https://dart.dev/tools/pub/writing-package-pages). 
+`common_code_domain` contains the first shared CommonCode domain model in pure
+Dart.
 
-For general information about developing packages, see the Dart guide for
-[creating packages](https://dart.dev/guides/libraries/create-packages)
-and the Flutter guide for
-[developing packages and plugins](https://flutter.dev/to/develop-packages). 
--->
+## Scope
 
-TODO: Put a short description of the package here that helps potential users
-know whether this package might be useful for them.
+This package currently models only the issue #2 shared domain core:
 
-## Features
+- `Session`
+- `PromptThread`
+- `Turn`
+- `Client`
+- `Host`
 
-TODO: List what your package can do. Maybe include images, gifs, or videos.
+The package enforces these session-level invariants:
 
-## Getting started
+- a valid `Session` always has exactly one active `Host`
+- a valid `Session` has at most one active `Turn`
+- when a `Client` starts a new `Turn`, that client becomes the session input
+  client for the active turn
 
-TODO: List prerequisites and provide or point to information on how to
-start using the package.
+Invalid transitions fail with `SessionFailure` so callers and tests can assert
+on invariant violations directly.
+
+## Temporary compatibility export
+
+The package entrypoint also still exports `CommonCodeDomainDescriptor` and
+`commonCodeDomainDescriptor` as a **temporary compatibility shim** for the
+existing scaffold consumer.
+
+That placeholder descriptor is transitional only. It is retained narrowly so the
+current scaffold app can continue to analyze and test while the real shared
+domain model introduced in issue #2 becomes the intended package contract.
 
 ## Usage
 
-TODO: Include short and useful examples for package users. Add longer examples
-to `/example` folder. 
-
 ```dart
-const like = 'sample';
+import 'package:common_code_domain/common_code_domain.dart';
+
+void main() {
+  const host = Host(id: 'host-1');
+  const client = Client(id: 'client-1');
+
+  final session = Session(
+    id: 'session-1',
+    activeHost: host,
+    clients: const [client],
+  );
+
+  final updatedSession = session.startTurn(turnId: 'turn-1', client: client);
+
+  print(updatedSession.inputClient); // Client(id: client-1)
+}
 ```
 
-## Additional information
+## Non-goals
 
-TODO: Tell users more about the package: where to find more information, how to 
-contribute to the package, how to file issues, what response they can expect 
-from the package authors, and more.
+This package does not currently model storage, transport, host services, UI,
+or execution-loop behavior.
