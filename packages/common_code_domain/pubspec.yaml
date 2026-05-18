@@ -1,5 +1,5 @@
 name: common_code_domain
-description: Placeholder CommonCode domain package for workspace wiring.
+description: Shared CommonCode domain model for sessions, turns, clients, and hosts.
 version: 1.0.0
 publish_to: none
 
