@@ -2,17 +2,35 @@ final class Turn {
   const Turn._({
     required this.id,
     required this.clientId,
+    required this.submittedText,
     required this.isActive,
   });
 
-  const Turn.active({required String id, required String clientId})
-    : this._(id: id, clientId: clientId, isActive: true);
+  const Turn.active({
+    required String id,
+    required String clientId,
+    required String submittedText,
+  }) : this._(
+         id: id,
+         clientId: clientId,
+         submittedText: submittedText,
+         isActive: true,
+       );
 
-  const Turn.completed({required String id, required String clientId})
-    : this._(id: id, clientId: clientId, isActive: false);
+  const Turn.completed({
+    required String id,
+    required String clientId,
+    required String submittedText,
+  }) : this._(
+         id: id,
+         clientId: clientId,
+         submittedText: submittedText,
+         isActive: false,
+       );
 
   final String id;
   final String clientId;
+  final String submittedText;
   final bool isActive;
 
   Turn complete() {
@@ -20,7 +38,11 @@ final class Turn {
       return this;
     }
 
-    return Turn.completed(id: id, clientId: clientId);
+    return Turn.completed(
+      id: id,
+      clientId: clientId,
+      submittedText: submittedText,
+    );
   }
 
   @override
@@ -29,14 +51,16 @@ final class Turn {
         other is Turn &&
             other.id == id &&
             other.clientId == clientId &&
+            other.submittedText == submittedText &&
             other.isActive == isActive;
   }
 
   @override
-  int get hashCode => Object.hash(id, clientId, isActive);
+  int get hashCode => Object.hash(id, clientId, submittedText, isActive);
 
   @override
   String toString() {
-    return 'Turn(id: $id, clientId: $clientId, isActive: $isActive)';
+    return 'Turn(id: $id, clientId: $clientId, submittedText: '
+        '$submittedText, isActive: $isActive)';
   }
 }

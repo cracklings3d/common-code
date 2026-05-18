@@ -70,7 +70,11 @@ void main() {
         id: 'session-1',
         activeHost: host,
         clients: const [clientA],
-      ).startTurn(turnId: 'turn-1', client: clientA);
+      ).startTurn(
+        turnId: 'turn-1',
+        client: clientA,
+        submittedText: 'Existing submitted turn',
+      );
 
       final updatedSession = session.attachClient(clientB);
 
@@ -87,27 +91,56 @@ void main() {
         final updatedSession = session.startTurn(
           turnId: 'turn-1',
           client: clientA,
+          submittedText: 'First submitted turn',
         );
 
         expect(
           updatedSession.activeTurn,
-          const Turn.active(id: 'turn-1', clientId: 'client-a'),
+          const Turn.active(
+            id: 'turn-1',
+            clientId: 'client-a',
+            submittedText: 'First submitted turn',
+          ),
         );
         expect(updatedSession.inputClient, clientA);
         expect(updatedSession.promptThread.turns, [
-          const Turn.active(id: 'turn-1', clientId: 'client-a'),
+          const Turn.active(
+            id: 'turn-1',
+            clientId: 'client-a',
+            submittedText: 'First submitted turn',
+          ),
         ]);
       },
     );
+
+    test('starting a turn stores the submitted plain text on the turn', () {
+      final session = buildSession();
+
+      final updatedSession = session.startTurn(
+        turnId: 'turn-1',
+        client: clientA,
+        submittedText: 'Ship the desktop authoring flow.',
+      );
+
+      expect(
+        updatedSession.activeTurn?.submittedText,
+        'Ship the desktop authoring flow.',
+      );
+    });
 
     test('rejects a second active turn while one is already active', () {
       final session = buildSession().startTurn(
         turnId: 'turn-1',
         client: clientA,
+        submittedText: 'First submitted turn',
       );
 
       expect(
-        () => session.startTurn(turnId: 'turn-2', client: clientB),
+        () => session.startTurn(
+          turnId: 'turn-2',
+          client: clientB,
+          submittedText: 'Second submitted turn',
+        ),
         throwsA(
           isA<SessionFailure>().having(
             (failure) => failure.code,
@@ -122,6 +155,7 @@ void main() {
       final session = buildSession().startTurn(
         turnId: 'turn-1',
         client: clientA,
+        submittedText: 'First submitted turn',
       );
 
       final updatedSession = session.completeActiveTurn();
@@ -129,7 +163,11 @@ void main() {
       expect(updatedSession.activeTurn, isNull);
       expect(updatedSession.inputClient, isNull);
       expect(updatedSession.promptThread.turns, [
-        const Turn.completed(id: 'turn-1', clientId: 'client-a'),
+        const Turn.completed(
+          id: 'turn-1',
+          clientId: 'client-a',
+          submittedText: 'First submitted turn',
+        ),
       ]);
     });
 
@@ -137,19 +175,51 @@ void main() {
       final firstTurnSession = buildSession().startTurn(
         turnId: 'turn-1',
         client: clientA,
+        submittedText: 'First submitted turn',
       );
       final completedFirstTurnSession = firstTurnSession.completeActiveTurn();
 
       final secondTurnSession = completedFirstTurnSession.startTurn(
         turnId: 'turn-2',
         client: clientB,
+        submittedText: 'Second submitted turn',
       );
 
       expect(secondTurnSession.promptThread.turns, [
-        const Turn.completed(id: 'turn-1', clientId: 'client-a'),
-        const Turn.active(id: 'turn-2', clientId: 'client-b'),
+        const Turn.completed(
+          id: 'turn-1',
+          clientId: 'client-a',
+          submittedText: 'First submitted turn',
+        ),
+        const Turn.active(
+          id: 'turn-2',
+          clientId: 'client-b',
+          submittedText: 'Second submitted turn',
+        ),
       ]);
       expect(secondTurnSession.inputClient, clientB);
+    });
+
+    test('prompt thread preserves submitted text in order', () {
+      final firstTurnSession = buildSession().startTurn(
+        turnId: 'turn-1',
+        client: clientA,
+        submittedText: 'First submitted turn',
+      );
+      final secondTurnSession = firstTurnSession
+          .completeActiveTurn()
+          .startTurn(
+            turnId: 'turn-2',
+            client: clientB,
+            submittedText: 'Second submitted turn',
+          );
+
+      expect(
+        secondTurnSession.promptThread.turns
+            .map((turn) => turn.submittedText)
+            .toList(),
+        ['First submitted turn', 'Second submitted turn'],
+      );
     });
 
     test('rejects completing a turn when no active turn exists', () {
@@ -177,7 +247,11 @@ void main() {
             clients: const [clientA],
             promptThread: PromptThread(
               turns: const [
-                Turn.active(id: 'turn-1', clientId: 'missing-client'),
+                Turn.active(
+                  id: 'turn-1',
+                  clientId: 'missing-client',
+                  submittedText: 'Missing client turn',
+                ),
               ],
             ),
           ),
@@ -206,7 +280,11 @@ void main() {
         expect(session, isA<Session>());
         expect(promptThread, isA<PromptThread>());
         expect(
-          const Turn.active(id: 'turn-1', clientId: 'client-a'),
+          const Turn.active(
+            id: 'turn-1',
+            clientId: 'client-a',
+            submittedText: 'Entry point turn',
+          ),
           isA<Turn>(),
         );
         expect(host, isA<Host>());
