@@ -4,6 +4,7 @@ import 'package:common_code_domain/common_code_domain.dart';
 import 'package:flutter/foundation.dart';
 import 'package:host_core/host_core.dart';
 
+import 'desktop_session_runtime.dart';
 import 'desktop_session_snapshot_store.dart';
 
 final class DesktopSessionSnapshot {
@@ -40,17 +41,15 @@ final class DesktopSessionControllerState {
 
   const DesktopSessionControllerState.data(
     DesktopSessionSnapshot this.snapshot, {
-    bool isSubmitting = false,
+    this.isSubmitting = false,
   }) : status = DesktopSessionControllerStatus.data,
-       message = null,
-       isSubmitting = isSubmitting;
+       message = null;
 
   const DesktopSessionControllerState.error(
     String this.message, {
-    bool isSubmitting = false,
+    this.isSubmitting = false,
   }) : status = DesktopSessionControllerStatus.error,
-       snapshot = null,
-       isSubmitting = isSubmitting;
+       snapshot = null;
 
   final DesktopSessionControllerStatus status;
   final DesktopSessionSnapshot? snapshot;
@@ -78,33 +77,40 @@ final class DesktopSessionControllerState {
 
 class DesktopSessionController extends ChangeNotifier {
   DesktopSessionController({
+    DesktopSessionRuntime? runtime,
     HostService? hostService,
     DesktopSessionSnapshotStore? snapshotStore,
-  }) : _hostService = hostService,
-       _snapshotStore =
-           snapshotStore ?? SharedPreferencesDesktopSessionSnapshotStore();
+  }) : _runtime =
+           runtime ??
+           HostDesktopSessionRuntime(
+             hostService: hostService,
+             snapshotStore: snapshotStore,
+           ) {
+    _runtime.bind(
+      onSnapshot: _handleRuntimeSnapshot,
+      onWatchError: _handleRuntimeWatchError,
+    );
+  }
 
-  static const defaultSessionId = 'desktop-session';
-  static const hostId = 'desktop-host';
-  static const attachedClientId = 'desktop-client';
+  static const attachedClientId = desktopSessionRuntimeAttachedClientId;
 
-  final HostService? _hostService;
-  final DesktopSessionSnapshotStore _snapshotStore;
+  final DesktopSessionRuntime _runtime;
 
   DesktopSessionControllerState _state =
       const DesktopSessionControllerState.loading();
-  HostService? _service;
-  StreamSubscription<Session>? _watchSubscription;
-  Future<void> _watchRestartSequence = Future<void>.value();
-  bool _isBootstrapped = false;
   bool _isDisposed = false;
-  String? _currentSessionId;
 
   DesktopSessionControllerState get state => _state;
 
-  Future<void> initialize() => _startSessionWatch();
+  Future<void> initialize() async {
+    _emitState(const DesktopSessionControllerState.loading());
+    await _runtime.initialize();
+  }
 
-  Future<void> refresh() => _startSessionWatch();
+  Future<void> refresh() async {
+    _emitState(const DesktopSessionControllerState.loading());
+    await _runtime.refresh();
+  }
 
   @protected
   @visibleForTesting
@@ -114,14 +120,7 @@ class DesktopSessionController extends ChangeNotifier {
     _emitState(_state.copyWithSubmitting(true));
 
     try {
-      final service = _service ??= _hostService ?? createInMemoryHostService();
-      await _bootstrapIfNeeded();
-
-      service.submitTurn(
-        sessionId: _currentSessionId!,
-        client: const Client(id: attachedClientId),
-        submittedText: submittedText,
-      );
+      await _runtime.submitTurn(submittedText: submittedText);
     } catch (error) {
       _emitState(
         DesktopSessionControllerState.error(
@@ -135,114 +134,25 @@ class DesktopSessionController extends ChangeNotifier {
     _emitState(_state.copyWithSubmitting(false));
   }
 
-  Future<void> _startSessionWatch() {
-    final scheduledRestart = _watchRestartSequence.then(
-      (_) => _performStartSessionWatch(),
-    );
-    _watchRestartSequence = scheduledRestart.catchError((
-      Object _,
-      StackTrace __,
-    ) {
-      // Keep later refresh requests runnable even if a prior restart fails.
-    });
-    return scheduledRestart;
-  }
-
-  Future<void> _performStartSessionWatch() async {
-    final existingWatch = _watchSubscription;
-    _watchSubscription = null;
-    if (existingWatch != null) {
-      await existingWatch.cancel();
-    }
-
-    _emitState(const DesktopSessionControllerState.loading());
-    final firstStateSettled = Completer<void>();
-
-    try {
-      final service = _service ??= _hostService ?? createInMemoryHostService();
-      await _bootstrapIfNeeded();
-
-      final watchStream = service.watchSession(_currentSessionId!);
-      _watchSubscription = watchStream.listen(
-        (session) {
-          _emitState(
-            DesktopSessionControllerState.data(
-              DesktopSessionSnapshot(
-                session: session,
-                attachedClientId: attachedClientId,
-              ),
-              isSubmitting: _state.isSubmitting,
-            ),
-          );
-          if (!firstStateSettled.isCompleted) {
-            firstStateSettled.complete();
-          }
-          unawaited(_persistSnapshot(session));
-        },
-        onError: (Object error, StackTrace stackTrace) {
-          _emitState(
-            DesktopSessionControllerState.error(
-              error.toString(),
-              isSubmitting: false,
-            ),
-          );
-          if (!firstStateSettled.isCompleted) {
-            firstStateSettled.complete();
-          }
-        },
-      );
-      await firstStateSettled.future;
-    } catch (error) {
-      _emitState(
-        DesktopSessionControllerState.error(
-          error.toString(),
-          isSubmitting: false,
+  void _handleRuntimeSnapshot(Session session) {
+    _emitState(
+      DesktopSessionControllerState.data(
+        DesktopSessionSnapshot(
+          session: session,
+          attachedClientId: attachedClientId,
         ),
-      );
-      if (!firstStateSettled.isCompleted) {
-        firstStateSettled.complete();
-      }
-    }
+        isSubmitting: _state.isSubmitting,
+      ),
+    );
   }
 
-  Future<void> _bootstrapIfNeeded() async {
-    final service = _service ??= _hostService ?? createInMemoryHostService();
-    if (_isBootstrapped) {
-      return;
-    }
-
-    final restoredSession = await _snapshotStore.readLatestSession(
-      desktopClientId: attachedClientId,
+  void _handleRuntimeWatchError(Object error, StackTrace stackTrace) {
+    _emitState(
+      DesktopSessionControllerState.error(
+        error.toString(),
+        isSubmitting: false,
+      ),
     );
-    if (restoredSession != null) {
-      try {
-        service.restoreSession(restoredSession);
-        _currentSessionId = restoredSession.id;
-        _isBootstrapped = true;
-        return;
-      } catch (_) {
-        // Fall back to the fresh desktop bootstrap path.
-      }
-    }
-
-    service.createSession(
-      sessionId: defaultSessionId,
-      activeHost: const Host(id: hostId),
-    );
-    service.attachClient(
-      sessionId: defaultSessionId,
-      client: const Client(id: attachedClientId),
-    );
-    _currentSessionId = defaultSessionId;
-    _isBootstrapped = true;
-  }
-
-  Future<void> _persistSnapshot(Session session) async {
-    try {
-      await _snapshotStore.writeLatestSession(session);
-    } catch (_) {
-      // Persisting the mirror snapshot must not break the live host-backed UI.
-    }
   }
 
   void _emitState(DesktopSessionControllerState state) {
@@ -257,11 +167,7 @@ class DesktopSessionController extends ChangeNotifier {
   @override
   void dispose() {
     _isDisposed = true;
-    final watchSubscription = _watchSubscription;
-    _watchSubscription = null;
-    if (watchSubscription != null) {
-      unawaited(watchSubscription.cancel());
-    }
+    unawaited(_runtime.dispose());
     super.dispose();
   }
 }

@@ -1,6 +1,6 @@
 import 'dart:convert';
 
-import 'package:common_code_desktop/src/desktop_session_controller.dart';
+import 'package:common_code_desktop/src/desktop_session_runtime.dart';
 import 'package:common_code_desktop/src/desktop_session_snapshot_codec.dart';
 import 'package:common_code_desktop/src/desktop_session_snapshot_store.dart';
 import 'package:common_code_domain/common_code_domain.dart';
@@ -185,73 +185,80 @@ void main() {
     });
   });
 
-  group('DesktopSessionController persistence behavior', () {
+  group('HostDesktopSessionRuntime persistence behavior', () {
     test(
       'falls back to fresh bootstrap when no stored snapshot exists',
       () async {
-        final controller = DesktopSessionController(
+        final runtime = HostDesktopSessionRuntime(
           hostService: createInMemoryHostService(),
           snapshotStore: _FakeSnapshotStore(),
         );
-
-        await controller.initialize();
-
-        expect(controller.state.status, DesktopSessionControllerStatus.data);
-        expect(controller.state.snapshot, isNotNull);
-        expect(controller.state.snapshot!.session.id, 'desktop-session');
-        expect(
-          controller.state.snapshot!.session.activeHost.id,
-          'desktop-host',
+        Session? snapshot;
+        runtime.bind(
+          onSnapshot: (session) => snapshot = session,
+          onWatchError: (error, stackTrace) {},
         );
-        expect(
-          controller.state.snapshot!.session.clients.map((client) => client.id),
-          ['desktop-client'],
-        );
-        expect(controller.state.snapshot!.session.activeTurn, isNull);
+
+        await runtime.initialize();
+
+        expect(snapshot, isNotNull);
+        expect(snapshot!.id, 'desktop-session');
+        expect(snapshot!.activeHost.id, 'desktop-host');
+        expect(snapshot!.clients.map((client) => client.id), [
+          'desktop-client',
+        ]);
+        expect(snapshot!.activeTurn, isNull);
       },
     );
 
     test(
       'falls back to fresh bootstrap when stored snapshot is invalid',
       () async {
-        final controller = DesktopSessionController(
+        final runtime = HostDesktopSessionRuntime(
           hostService: createInMemoryHostService(),
           snapshotStore: _FakeSnapshotStore(storedSession: null),
         );
+        Session? snapshot;
+        runtime.bind(
+          onSnapshot: (session) => snapshot = session,
+          onWatchError: (error, stackTrace) {},
+        );
 
-        await controller.initialize();
+        await runtime.initialize();
 
-        expect(controller.state.status, DesktopSessionControllerStatus.data);
-        expect(controller.state.snapshot!.session.id, 'desktop-session');
+        expect(snapshot, isNotNull);
+        expect(snapshot!.id, 'desktop-session');
       },
     );
 
     test('restores a valid stored snapshot and preserves identities', () async {
-      final controller = DesktopSessionController(
+      final runtime = HostDesktopSessionRuntime(
         hostService: createInMemoryHostService(),
         snapshotStore: _FakeSnapshotStore(
           storedSession: _runningRestoredSession(),
         ),
       );
+      Session? snapshot;
+      runtime.bind(
+        onSnapshot: (session) => snapshot = session,
+        onWatchError: (error, stackTrace) {},
+      );
 
-      await controller.initialize();
+      await runtime.initialize();
 
-      final snapshot = controller.state.snapshot;
       expect(snapshot, isNotNull);
-      expect(snapshot!.session.id, 'restored-session');
-      expect(snapshot.session.activeHost.id, 'restored-host');
-      expect(snapshot.session.clients.map((client) => client.id).toList(), [
+      expect(snapshot!.id, 'restored-session');
+      expect(snapshot!.activeHost.id, 'restored-host');
+      expect(snapshot!.clients.map((client) => client.id).toList(), [
         'desktop-client',
         'reviewer-client',
       ]);
       expect(
-        snapshot.session.promptThread.turns
-            .map((turn) => turn.submittedText)
-            .toList(),
+        snapshot!.promptThread.turns.map((turn) => turn.submittedText).toList(),
         ['First submitted turn', 'Second submitted turn'],
       );
-      expect(snapshot.session.activeTurn?.status, TurnStatus.running);
-      expect(snapshot.session.inputClient?.id, 'reviewer-client');
+      expect(snapshot!.activeTurn?.status, TurnStatus.running);
+      expect(snapshot!.inputClient?.id, 'reviewer-client');
     });
 
     test(
@@ -263,25 +270,24 @@ void main() {
             runningToTerminalDelay: Duration.zero,
           ),
         );
-        final controller = DesktopSessionController(
+        final runtime = HostDesktopSessionRuntime(
           hostService: hostService,
           snapshotStore: _FakeSnapshotStore(
             storedSession: _queuedRestoredSession(),
           ),
         );
-
-        await controller.initialize();
-
-        expect(controller.state.snapshot, isNotNull);
-        expect(
-          controller.state.snapshot!.session.activeTurn?.status,
-          TurnStatus.queued,
+        Session? snapshot;
+        runtime.bind(
+          onSnapshot: (session) => snapshot = session,
+          onWatchError: (error, stackTrace) {},
         );
-        expect(
-          controller.state.snapshot!.session.inputClient?.id,
-          'reviewer-client',
-        );
-        expect(controller.state.snapshot!.session.notifications, isEmpty);
+
+        await runtime.initialize();
+
+        expect(snapshot, isNotNull);
+        expect(snapshot!.activeTurn?.status, TurnStatus.queued);
+        expect(snapshot!.inputClient?.id, 'reviewer-client');
+        expect(snapshot!.notifications, isEmpty);
         expect(
           hostService.readSession('restored-session').activeTurn?.status,
           TurnStatus.queued,
@@ -298,28 +304,24 @@ void main() {
             runningToTerminalDelay: Duration.zero,
           ),
         );
-        final controller = DesktopSessionController(
+        final runtime = HostDesktopSessionRuntime(
           hostService: hostService,
           snapshotStore: _FakeSnapshotStore(
             storedSession: _runningRestoredSession(),
           ),
         );
+        Session? snapshot;
+        runtime.bind(
+          onSnapshot: (session) => snapshot = session,
+          onWatchError: (error, stackTrace) {},
+        );
 
-        await controller.initialize();
+        await runtime.initialize();
 
-        expect(controller.state.snapshot, isNotNull);
-        expect(
-          controller.state.snapshot!.session.activeTurn?.status,
-          TurnStatus.running,
-        );
-        expect(
-          controller.state.snapshot!.session.inputClient?.id,
-          'reviewer-client',
-        );
-        expect(
-          controller.state.snapshot!.session.notifications,
-          _runningRestoredSession().notifications,
-        );
+        expect(snapshot, isNotNull);
+        expect(snapshot!.activeTurn?.status, TurnStatus.running);
+        expect(snapshot!.inputClient?.id, 'reviewer-client');
+        expect(snapshot!.notifications, _runningRestoredSession().notifications);
         expect(
           hostService.readSession('restored-session').activeTurn?.status,
           TurnStatus.running,
@@ -328,60 +330,61 @@ void main() {
     );
 
     test('restored completed snapshot keeps input client at none', () async {
-      final controller = DesktopSessionController(
+      final runtime = HostDesktopSessionRuntime(
         hostService: createInMemoryHostService(),
         snapshotStore: _FakeSnapshotStore(
           storedSession: _completedRestoredSession(),
         ),
       );
-
-      await controller.initialize();
-
-      expect(controller.state.snapshot!.session.activeTurn, isNull);
-      expect(controller.state.snapshot!.session.inputClient, isNull);
-      expect(
-        controller.state.snapshot!.session.notifications,
-        _completedRestoredSession().notifications,
+      Session? snapshot;
+      runtime.bind(
+        onSnapshot: (session) => snapshot = session,
+        onWatchError: (error, stackTrace) {},
       );
+
+      await runtime.initialize();
+
+      expect(snapshot!.activeTurn, isNull);
+      expect(snapshot!.inputClient, isNull);
+      expect(snapshot!.notifications, _completedRestoredSession().notifications);
     });
 
     test('restored failed snapshot keeps input client at none', () async {
-      final controller = DesktopSessionController(
+      final runtime = HostDesktopSessionRuntime(
         hostService: createInMemoryHostService(),
         snapshotStore: _FakeSnapshotStore(
           storedSession: _failedRestoredSession(),
         ),
       );
-
-      await controller.initialize();
-
-      expect(controller.state.snapshot!.session.activeTurn, isNull);
-      expect(controller.state.snapshot!.session.inputClient, isNull);
-      expect(
-        controller.state.snapshot!.session.notifications,
-        _failedRestoredSession().notifications,
+      Session? snapshot;
+      runtime.bind(
+        onSnapshot: (session) => snapshot = session,
+        onWatchError: (error, stackTrace) {},
       );
+
+      await runtime.initialize();
+
+      expect(snapshot!.activeTurn, isNull);
+      expect(snapshot!.inputClient, isNull);
+      expect(snapshot!.notifications, _failedRestoredSession().notifications);
       expect(
-        controller
-            .state
-            .snapshot!
-            .session
-            .promptThread
-            .turns
-            .single
-            .failureSummary,
+        snapshot!.promptThread.turns.single.failureSummary,
         'Restored failure.',
       );
     });
 
     test('watch writes each emitted snapshot back to storage', () async {
       final store = _FakeSnapshotStore();
-      final controller = DesktopSessionController(
+      final runtime = HostDesktopSessionRuntime(
         hostService: createInMemoryHostService(),
         snapshotStore: store,
       );
+      runtime.bind(
+        onSnapshot: (session) {},
+        onWatchError: (error, stackTrace) {},
+      );
 
-      await controller.initialize();
+      await runtime.initialize();
       await Future<void>.delayed(Duration.zero);
 
       expect(store.writtenSessions, isNotEmpty);
@@ -389,16 +392,21 @@ void main() {
     });
 
     test('persistence write failures are non-fatal to live state', () async {
-      final controller = DesktopSessionController(
+      final runtime = HostDesktopSessionRuntime(
         hostService: createInMemoryHostService(),
         snapshotStore: _ThrowingSnapshotStore(),
       );
+      Session? snapshot;
+      runtime.bind(
+        onSnapshot: (session) => snapshot = session,
+        onWatchError: (error, stackTrace) {},
+      );
 
-      await controller.initialize();
+      await runtime.initialize();
       await Future<void>.delayed(Duration.zero);
 
-      expect(controller.state.status, DesktopSessionControllerStatus.data);
-      expect(controller.state.snapshot!.session.id, 'desktop-session');
+      expect(snapshot, isNotNull);
+      expect(snapshot!.id, 'desktop-session');
     });
   });
 }
