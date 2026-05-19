@@ -121,6 +121,61 @@ void main() {
       },
     );
 
+    test('restoreSession stores a provided session for later reads', () {
+      final service = createInMemoryHostService();
+      final restoredSession = Session(
+        id: 'restored-session',
+        activeHost: host,
+      ).attachClient(client);
+
+      final storedSession = service.restoreSession(restoredSession);
+
+      expect(storedSession, same(restoredSession));
+      expect(service.readSession('restored-session'), same(restoredSession));
+    });
+
+    test('watchSession immediately emits a restored snapshot', () async {
+      final service = createInMemoryHostService();
+      final restoredSession = Session(
+        id: 'restored-session',
+        activeHost: host,
+      ).attachClient(client);
+
+      service.restoreSession(restoredSession);
+      final snapshots = await service.watchSession('restored-session').take(1).toList();
+
+      expect(snapshots.single, same(restoredSession));
+    });
+
+    test(
+      'restoring queued or running turns does not trigger automatic execution progression',
+      () async {
+        final service = createInMemoryHostService(
+          simulationPolicy: const HostExecutionSimulationPolicy(
+            queuedToRunningDelay: Duration.zero,
+            runningToTerminalDelay: Duration.zero,
+          ),
+        );
+        final restoredSession = Session(
+          id: 'restored-session',
+          activeHost: host,
+        ).attachClient(client).startTurn(
+          turnId: 'turn-1',
+          client: client,
+          submittedText: 'Restored queued turn.',
+        );
+
+        service.restoreSession(restoredSession);
+        final snapshots = <Session>[];
+        final subscription = service.watchSession('restored-session').listen(snapshots.add);
+        await Future<void>.delayed(const Duration(milliseconds: 50));
+        await subscription.cancel();
+
+        expect(snapshots, hasLength(1));
+        expect(snapshots.single.activeTurn?.status, TurnStatus.queued);
+      },
+    );
+
     test(
       'simulated loop emits queued running and completed snapshots in order',
       () async {
@@ -291,6 +346,25 @@ void main() {
 
       expect(
         () => service.createSession(sessionId: 'session-1', activeHost: host),
+        throwsA(
+          isA<HostServiceFailure>().having(
+            (failure) => failure.code,
+            'code',
+            HostServiceFailureCode.duplicateSessionId,
+          ),
+        ),
+      );
+    });
+
+    test('restoring a duplicate session id fails explicitly', () {
+      final service = createInMemoryHostService();
+
+      service.createSession(sessionId: 'session-1', activeHost: host);
+
+      expect(
+        () => service.restoreSession(
+          Session(id: 'session-1', activeHost: host),
+        ),
         throwsA(
           isA<HostServiceFailure>().having(
             (failure) => failure.code,

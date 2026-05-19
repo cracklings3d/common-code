@@ -36,6 +36,7 @@ dependencies:
     path: ../../packages/common_code_domain
   host_core:
     path: ../../packages/host_core
+  shared_preferences: ^2.5.3
 
 dev_dependencies:
   flutter_test:

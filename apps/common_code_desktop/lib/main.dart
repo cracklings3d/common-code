@@ -4,6 +4,8 @@ import 'package:common_code_domain/common_code_domain.dart';
 import 'package:flutter/material.dart';
 import 'package:host_core/host_core.dart';
 
+import 'src/desktop_session_snapshot_store.dart';
+
 void main() {
   runApp(CommonCodeDesktopApp());
 }
@@ -45,17 +47,23 @@ final class DesktopSessionSnapshot {
 }
 
 final class DesktopHostSessionLoader implements DesktopSessionLoader {
-  DesktopHostSessionLoader({HostService? hostService})
-    : _hostService = hostService;
+  DesktopHostSessionLoader({
+    HostService? hostService,
+    DesktopSessionSnapshotStore? snapshotStore,
+  }) : _hostService = hostService,
+       _snapshotStore =
+           snapshotStore ?? SharedPreferencesDesktopSessionSnapshotStore();
 
   final HostService? _hostService;
+  final DesktopSessionSnapshotStore _snapshotStore;
 
-  static const _sessionId = 'desktop-session';
+  static const _defaultSessionId = 'desktop-session';
   static const _hostId = 'desktop-host';
   static const _attachedClientId = 'desktop-client';
 
   HostService? _service;
   bool _isBootstrapped = false;
+  String? _currentSessionId;
 
   Future<void> _bootstrapIfNeeded() async {
     final service = _service ??= _hostService ?? createInMemoryHostService();
@@ -64,14 +72,29 @@ final class DesktopHostSessionLoader implements DesktopSessionLoader {
       return;
     }
 
+    final restoredSession = await _snapshotStore.readLatestSession(
+      desktopClientId: _attachedClientId,
+    );
+    if (restoredSession != null) {
+      try {
+        service.restoreSession(restoredSession);
+        _currentSessionId = restoredSession.id;
+        _isBootstrapped = true;
+        return;
+      } catch (_) {
+        // Fall back to the existing fresh desktop bootstrap path.
+      }
+    }
+
     service.createSession(
-      sessionId: _sessionId,
+      sessionId: _defaultSessionId,
       activeHost: const Host(id: _hostId),
     );
     service.attachClient(
-      sessionId: _sessionId,
+      sessionId: _defaultSessionId,
       client: const Client(id: _attachedClientId),
     );
+    _currentSessionId = _defaultSessionId;
     _isBootstrapped = true;
   }
 
@@ -79,9 +102,10 @@ final class DesktopHostSessionLoader implements DesktopSessionLoader {
   Future<DesktopSessionSnapshot?> load() async {
     final service = _service ??= _hostService ?? createInMemoryHostService();
     await _bootstrapIfNeeded();
+    final sessionId = _currentSessionId!;
 
     return DesktopSessionSnapshot(
-      session: service.readSession(_sessionId),
+      session: service.readSession(sessionId),
       attachedClientId: _attachedClientId,
     );
   }
@@ -90,8 +114,15 @@ final class DesktopHostSessionLoader implements DesktopSessionLoader {
   Stream<DesktopSessionSnapshot?> watch() async* {
     final service = _service ??= _hostService ?? createInMemoryHostService();
     await _bootstrapIfNeeded();
+    final sessionId = _currentSessionId!;
 
-    await for (final session in service.watchSession(_sessionId)) {
+    await for (final session in service.watchSession(sessionId)) {
+      try {
+        await _snapshotStore.writeLatestSession(session);
+      } catch (_) {
+        // Persisting the mirror snapshot must not break the live host-backed UI.
+      }
+
       yield DesktopSessionSnapshot(
         session: session,
         attachedClientId: _attachedClientId,
@@ -106,9 +137,10 @@ final class DesktopHostSessionLoader implements DesktopSessionLoader {
     final service = _service ??= _hostService ?? createInMemoryHostService();
 
     await _bootstrapIfNeeded();
+    final sessionId = _currentSessionId!;
 
     final session = service.submitTurn(
-      sessionId: _sessionId,
+      sessionId: sessionId,
       client: const Client(id: _attachedClientId),
       submittedText: submittedText,
     );
@@ -370,6 +402,9 @@ class _SessionDataView extends StatelessWidget {
     final inputClientId = session.inputClient?.id ?? 'none';
     final activeTurnId = session.activeTurn?.id ?? 'none';
     final hasActiveTurn = session.activeTurn != null;
+    final attachedClientIds = session.clients
+        .map((client) => client.id)
+        .join(', ');
 
     return _SessionSection(
       title: 'Live Session state',
@@ -379,6 +414,8 @@ class _SessionDataView extends StatelessWidget {
         Text('Host id: ${session.activeHost.id}'),
         const SizedBox(height: 8),
         Text('Attached Client: ${snapshot.attachedClientId}'),
+        const SizedBox(height: 8),
+        Text('Attached Clients: $attachedClientIds'),
         const SizedBox(height: 8),
         Text('Input Client: $inputClientId'),
         const SizedBox(height: 8),

@@ -7,6 +7,8 @@ abstract interface class HostService {
 
   Stream<Session> watchSession(String sessionId);
 
+  Session restoreSession(Session session);
+
   Session submitTurn({
     required String sessionId,
     required Client client,
