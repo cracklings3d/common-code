@@ -47,6 +47,7 @@ class SessionScreen extends StatefulWidget {
 class _SessionScreenState extends State<SessionScreen> {
   final TextEditingController _draftController = TextEditingController();
   final Set<String> _renderedNotificationIds = <String>{};
+  bool _resetRenderedNotificationIdsOnNextData = true;
 
   @override
   void initState() {
@@ -64,13 +65,20 @@ class _SessionScreenState extends State<SessionScreen> {
 
     oldWidget.sessionController.removeListener(_handleSessionControllerUpdate);
     _renderedNotificationIds.clear();
+    _resetRenderedNotificationIdsOnNextData = true;
     widget.sessionController.addListener(_handleSessionControllerUpdate);
   }
 
   void _handleSessionControllerUpdate() {
     final state = widget.sessionController.state;
     if (state.status != DesktopSessionControllerStatus.data) {
+      _resetRenderedNotificationIdsOnNextData = true;
       return;
+    }
+
+    if (_resetRenderedNotificationIdsOnNextData) {
+      _renderedNotificationIds.clear();
+      _resetRenderedNotificationIdsOnNextData = false;
     }
 
     final snapshot = state.snapshot!;
@@ -178,22 +186,22 @@ class _SessionScreenState extends State<SessionScreen> {
   }
 }
 
-List<_TurnTransitionNotice> _consumeSessionNotifications({
+List<_SessionNotificationNotice> _consumeSessionNotifications({
   required Session session,
   required Set<String> renderedNotificationIds,
 }) {
   final turnsById = {
     for (final turn in session.promptThread.turns) turn.id: turn,
   };
-  final notices = <_TurnTransitionNotice>[];
+  final notices = <_SessionNotificationNotice>[];
 
   for (final notification in session.notifications) {
     if (notification.isAcknowledged ||
-        !renderedNotificationIds.add(notification.id)) {
+        renderedNotificationIds.contains(notification.id)) {
       continue;
     }
 
-    final notice = _TurnTransitionNotice.fromNotification(
+    final notice = _SessionNotificationNotice.fromNotification(
       notification: notification,
       turn: turnsById[notification.turnId],
     );
@@ -201,16 +209,17 @@ List<_TurnTransitionNotice> _consumeSessionNotifications({
       continue;
     }
 
+    renderedNotificationIds.add(notification.id);
     notices.add(notice);
   }
 
   return notices;
 }
 
-final class _TurnTransitionNotice {
-  const _TurnTransitionNotice._({required this.message});
+final class _SessionNotificationNotice {
+  const _SessionNotificationNotice._({required this.message});
 
-  static _TurnTransitionNotice? fromNotification({
+  static _SessionNotificationNotice? fromNotification({
     required SessionNotification notification,
     required Turn? turn,
   }) {
@@ -219,16 +228,18 @@ final class _TurnTransitionNotice {
     }
 
     return switch (notification.transition) {
-      SessionNotificationTransition.queuedToRunning => _TurnTransitionNotice._(
-        message: 'Turn running: ${turn.submittedText}',
-      ),
+      SessionNotificationTransition.queuedToRunning =>
+        _SessionNotificationNotice._(
+          message: 'Turn running: ${turn.submittedText}',
+        ),
       SessionNotificationTransition.runningToCompleted =>
-        _TurnTransitionNotice._(
+        _SessionNotificationNotice._(
           message: 'Turn completed: ${turn.submittedText}',
         ),
-      SessionNotificationTransition.runningToFailed => _TurnTransitionNotice._(
-        message: 'Turn failed: ${turn.submittedText}',
-      ),
+      SessionNotificationTransition.runningToFailed =>
+        _SessionNotificationNotice._(
+          message: 'Turn failed: ${turn.submittedText}',
+        ),
     };
   }
 
