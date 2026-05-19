@@ -208,12 +208,17 @@ class _SessionDataView extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final session = snapshot.session;
-    final hasActiveTurn = session.activeTurn != null;
     final turns = session.promptThread.turns;
+    final authoringPresentation = _AuthoringPresentation.fromSnapshot(snapshot);
 
     return _SessionSection(
       title: 'Prompt Thread',
       children: [
+        _SessionContextChrome(
+          snapshot: snapshot,
+          authoringPresentation: authoringPresentation,
+        ),
+        const SizedBox(height: 16),
         if (turns.isEmpty)
           const _PromptThreadEmptyState()
         else
@@ -225,35 +230,208 @@ class _SessionDataView extends StatelessWidget {
             if (index < turns.length - 1) const SizedBox(height: 12),
           ],
         const SizedBox(height: 16),
-        if (!hasActiveTurn) ...[
-          TextField(
-            controller: draftController,
-            decoration: const InputDecoration(
-              labelText: 'Next Turn',
-              border: OutlineInputBorder(),
-            ),
-            maxLines: 3,
-          ),
-          const SizedBox(height: 12),
-          FilledButton(
-            onPressed: isSubmitting
-                ? null
-                : () async {
-                    await onSubmitTurn();
-                  },
-            child: Text(isSubmitting ? 'Submitting...' : 'Submit Turn'),
-          ),
-        ] else ...[
-          const Text(
-            'Next-turn authoring is unavailable while the current turn remains queued or running.',
-          ),
-        ],
+        _NextTurnComposer(
+          draftController: draftController,
+          onSubmitTurn: onSubmitTurn,
+          isSubmitting: isSubmitting,
+          authoringPresentation: authoringPresentation,
+        ),
         const SizedBox(height: 16),
         FilledButton(
           onPressed: () async {
             await onRefresh();
           },
           child: const Text('Refresh Session'),
+        ),
+      ],
+    );
+  }
+}
+
+enum _AuthoringMode { available, crossClientReadOnly, localActiveTurnLockout }
+
+final class _AuthoringPresentation {
+  const _AuthoringPresentation._({
+    required this.mode,
+    this.currentInputClientId,
+  });
+
+  factory _AuthoringPresentation.fromSnapshot(DesktopSessionSnapshot snapshot) {
+    final session = snapshot.session;
+    final inputClientId = session.inputClient?.id;
+
+    if (inputClientId == null) {
+      return const _AuthoringPresentation._(mode: _AuthoringMode.available);
+    }
+
+    if (inputClientId == snapshot.attachedClientId) {
+      return _AuthoringPresentation._(
+        mode: _AuthoringMode.localActiveTurnLockout,
+        currentInputClientId: inputClientId,
+      );
+    }
+
+    return _AuthoringPresentation._(
+      mode: _AuthoringMode.crossClientReadOnly,
+      currentInputClientId: inputClientId,
+    );
+  }
+
+  final _AuthoringMode mode;
+  final String? currentInputClientId;
+
+  bool get composerVisible => mode != _AuthoringMode.localActiveTurnLockout;
+
+  bool get composerEnabled => mode == _AuthoringMode.available;
+
+  String get modeLabel => switch (mode) {
+    _AuthoringMode.available => 'available',
+    _AuthoringMode.crossClientReadOnly =>
+      'read-only while Client $currentInputClientId owns input',
+    _AuthoringMode.localActiveTurnLockout =>
+      'locked while this desktop client turn is queued or running',
+  };
+
+  String? get composerMessage => switch (mode) {
+    _AuthoringMode.available => null,
+    _AuthoringMode.crossClientReadOnly =>
+      'This desktop presentation is read-only while Client '
+          '$currentInputClientId owns input.',
+    _AuthoringMode.localActiveTurnLockout =>
+      'Next-turn authoring is unavailable while the current turn remains '
+          'queued or running.',
+  };
+}
+
+class _SessionContextChrome extends StatelessWidget {
+  const _SessionContextChrome({
+    required this.snapshot,
+    required this.authoringPresentation,
+  });
+
+  final DesktopSessionSnapshot snapshot;
+  final _AuthoringPresentation authoringPresentation;
+
+  @override
+  Widget build(BuildContext context) {
+    final session = snapshot.session;
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Theme.of(context).colorScheme.surfaceContainerLow,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: Theme.of(context).colorScheme.outlineVariant),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'Session context',
+            style: Theme.of(context).textTheme.titleMedium,
+          ),
+          const SizedBox(height: 12),
+          Text('Local desktop Client: ${snapshot.attachedClientId}'),
+          Text('Current Input Client: ${session.inputClient?.id ?? 'none'}'),
+          Text('Authoring Mode: ${authoringPresentation.modeLabel}'),
+          const SizedBox(height: 12),
+          Text(
+            'Attached Clients',
+            style: Theme.of(context).textTheme.labelLarge,
+          ),
+          const SizedBox(height: 8),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              for (final client in session.clients)
+                _AttachedClientChip(
+                  clientId: client.id,
+                  isLocal: client.id == snapshot.attachedClientId,
+                  isInput: client.id == session.inputClient?.id,
+                ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _AttachedClientChip extends StatelessWidget {
+  const _AttachedClientChip({
+    required this.clientId,
+    required this.isLocal,
+    required this.isInput,
+  });
+
+  final String clientId;
+  final bool isLocal;
+  final bool isInput;
+
+  @override
+  Widget build(BuildContext context) {
+    final qualifiers = <String>[if (isLocal) 'local', if (isInput) 'input'];
+    final label = qualifiers.isEmpty
+        ? clientId
+        : '$clientId (${qualifiers.join(', ')})';
+
+    return Chip(label: Text(label));
+  }
+}
+
+class _NextTurnComposer extends StatelessWidget {
+  const _NextTurnComposer({
+    required this.draftController,
+    required this.onSubmitTurn,
+    required this.isSubmitting,
+    required this.authoringPresentation,
+  });
+
+  final TextEditingController draftController;
+  final Future<void> Function() onSubmitTurn;
+  final bool isSubmitting;
+  final _AuthoringPresentation authoringPresentation;
+
+  @override
+  Widget build(BuildContext context) {
+    final message = authoringPresentation.composerMessage;
+
+    if (!authoringPresentation.composerVisible) {
+      return Text(message!);
+    }
+
+    final isReadOnly = !authoringPresentation.composerEnabled;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        if (message != null) ...[Text(message), const SizedBox(height: 12)],
+        TextField(
+          controller: draftController,
+          enabled: !isReadOnly,
+          readOnly: isReadOnly,
+          decoration: InputDecoration(
+            labelText: isReadOnly ? 'Next Turn (read-only)' : 'Next Turn',
+            border: const OutlineInputBorder(),
+          ),
+          maxLines: 3,
+        ),
+        const SizedBox(height: 12),
+        FilledButton(
+          onPressed: isReadOnly || isSubmitting
+              ? null
+              : () async {
+                  await onSubmitTurn();
+                },
+          child: Text(
+            isSubmitting
+                ? 'Submitting...'
+                : isReadOnly
+                ? 'Submit Turn (read-only)'
+                : 'Submit Turn',
+          ),
         ),
       ],
     );
