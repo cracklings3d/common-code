@@ -3,7 +3,7 @@ import 'dart:async';
 import 'package:common_code_desktop/main.dart';
 import 'package:common_code_desktop/src/desktop_session_controller.dart';
 import 'package:common_code_domain/common_code_domain.dart';
-import 'package:flutter/material.dart' show TextField;
+import 'package:flutter/material.dart' show FilledButton, TextField;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -24,6 +24,11 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(find.text('Prompt Thread'), findsOneWidget);
+      expect(find.text('Session context'), findsOneWidget);
+      expect(find.text('Local desktop Client: desktop-client'), findsOneWidget);
+      expect(find.text('Current Input Client: none'), findsOneWidget);
+      expect(find.text('Authoring Mode: available'), findsOneWidget);
+      expect(find.text('desktop-client (local)'), findsOneWidget);
       expect(find.text('No turns yet'), findsOneWidget);
       expect(
         find.text('Submit the next turn to start this Prompt Thread.'),
@@ -130,9 +135,17 @@ void main() {
 
     expect(find.text('No turns yet'), findsOneWidget);
 
+    await tester.ensureVisible(find.text('Refresh Session'));
     await tester.tap(find.text('Refresh Session'));
     await tester.pumpAndSettle();
 
+    expect(find.text('Current Input Client: desktop-client'), findsOneWidget);
+    expect(
+      find.text(
+        'Authoring Mode: locked while this desktop client turn is queued or running',
+      ),
+      findsOneWidget,
+    );
     expect(find.text('Stored submitted turn'), findsOneWidget);
     expect(find.text('Status: queued'), findsOneWidget);
     expect(
@@ -177,11 +190,14 @@ void main() {
       find.byType(TextField),
       'Submit the first desktop turn.',
     );
+    await tester.ensureVisible(find.text('Submit Turn'));
     await tester.tap(find.text('Submit Turn'));
     await tester.pumpAndSettle();
 
     expect(controller.submittedTexts, ['Submit the first desktop turn.']);
     expect(find.text('This desktop client'), findsOneWidget);
+    expect(find.text('Current Input Client: desktop-client'), findsOneWidget);
+    expect(find.text('desktop-client (local, input)'), findsOneWidget);
     expect(find.text('Submit the first desktop turn.'), findsOneWidget);
     expect(find.text('Status: queued'), findsOneWidget);
     expect(find.byType(TextField), findsNothing);
@@ -214,6 +230,7 @@ void main() {
 
     expect(find.text('Status: queued'), findsOneWidget);
     expect(find.byType(TextField), findsNothing);
+    expect(find.text('Current Input Client: desktop-client'), findsOneWidget);
 
     controller.emit(
       DesktopSessionControllerState.data(
@@ -287,6 +304,113 @@ void main() {
     },
   );
 
+  testWidgets(
+    'shows local client input client and attached client set chrome',
+    (WidgetTester tester) async {
+      final controller = _FakeDesktopSessionController(
+        onInitialize: (controller) {
+          controller.emit(
+            DesktopSessionControllerState.data(
+              _buildSnapshot(session: _buildSessionWithAdditionalClient()),
+            ),
+          );
+        },
+      );
+
+      await tester.pumpWidget(
+        CommonCodeDesktopApp(sessionController: controller),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.text('Session context'), findsOneWidget);
+      expect(find.text('Local desktop Client: desktop-client'), findsOneWidget);
+      expect(find.text('Current Input Client: none'), findsOneWidget);
+      expect(find.text('desktop-client (local)'), findsOneWidget);
+      expect(find.text('reviewer-client'), findsOneWidget);
+      expect(find.text('Prompt Thread'), findsOneWidget);
+    },
+  );
+
+  testWidgets('cross-client input keeps composer visible but read-only', (
+    WidgetTester tester,
+  ) async {
+    final controller = _FakeDesktopSessionController(
+      onInitialize: (controller) {
+        controller.emit(
+          DesktopSessionControllerState.data(
+            _buildSnapshot(session: _buildCrossClientReadOnlySession()),
+          ),
+        );
+      },
+    );
+
+    await tester.pumpWidget(
+      CommonCodeDesktopApp(sessionController: controller),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('Current Input Client: reviewer-client'), findsOneWidget);
+    expect(find.text('desktop-client (local)'), findsOneWidget);
+    expect(find.text('reviewer-client (input)'), findsOneWidget);
+    expect(
+      find.text(
+        'Authoring Mode: read-only while Client reviewer-client owns input',
+      ),
+      findsOneWidget,
+    );
+    expect(
+      find.text(
+        'This desktop presentation is read-only while Client reviewer-client owns input.',
+      ),
+      findsOneWidget,
+    );
+    expect(
+      find.widgetWithText(TextField, 'Next Turn (read-only)'),
+      findsOneWidget,
+    );
+    expect(find.text('Submit Turn (read-only)'), findsOneWidget);
+
+    final textField = tester.widget<TextField>(find.byType(TextField));
+    expect(textField.readOnly, isTrue);
+    expect(textField.enabled, isFalse);
+
+    final button = tester.widget<FilledButton>(
+      find.widgetWithText(FilledButton, 'Submit Turn (read-only)'),
+    );
+    expect(button.onPressed, isNull);
+  });
+
+  testWidgets(
+    'desktop input client case preserves active-turn lockout while identifying local input',
+    (WidgetTester tester) async {
+      final controller = _FakeDesktopSessionController(
+        onInitialize: (controller) {
+          controller.emit(
+            DesktopSessionControllerState.data(
+              _buildSnapshot(session: _buildActiveTurnSession()),
+            ),
+          );
+        },
+      );
+
+      await tester.pumpWidget(
+        CommonCodeDesktopApp(sessionController: controller),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.text('Current Input Client: desktop-client'), findsOneWidget);
+      expect(find.text('desktop-client (local, input)'), findsOneWidget);
+      expect(
+        find.text(
+          'Next-turn authoring is unavailable while the current turn remains queued or running.',
+        ),
+        findsOneWidget,
+      );
+      expect(find.byType(TextField), findsNothing);
+      expect(find.text('Submit Turn'), findsNothing);
+    },
+  );
+
   testWidgets('previously submitted turns render in prompt thread order', (
     WidgetTester tester,
   ) async {
@@ -335,6 +459,12 @@ Session _buildBootstrapSession() {
   ).attachClient(const Client(id: 'desktop-client'));
 }
 
+Session _buildSessionWithAdditionalClient() {
+  return _buildBootstrapSession().attachClient(
+    const Client(id: 'reviewer-client'),
+  );
+}
+
 Session _buildActiveTurnSession() {
   final client = const Client(id: 'desktop-client');
 
@@ -347,6 +477,23 @@ Session _buildActiveTurnSession() {
         turnId: 'turn-1',
         client: client,
         submittedText: 'Stored submitted turn',
+      );
+}
+
+Session _buildCrossClientReadOnlySession() {
+  const desktopClient = Client(id: 'desktop-client');
+  const reviewerClient = Client(id: 'reviewer-client');
+
+  return Session(
+        id: 'desktop-session',
+        activeHost: const Host(id: 'desktop-host'),
+      )
+      .attachClient(desktopClient)
+      .attachClient(reviewerClient)
+      .startTurn(
+        turnId: 'turn-1',
+        client: reviewerClient,
+        submittedText: 'Reviewer-owned queued turn',
       );
 }
 
