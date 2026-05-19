@@ -85,6 +85,19 @@ final class _InMemoryHostService implements HostService {
   }
 
   @override
+  Session restoreSession(Session session) {
+    if (_sessionsById.containsKey(session.id)) {
+      throw HostServiceFailure(
+        HostServiceFailureCode.duplicateSessionId,
+        'Session ${session.id} already exists.',
+      );
+    }
+
+    _persistSession(session.id, session);
+    return session;
+  }
+
+  @override
   Session submitTurn({
     required String sessionId,
     required Client client,

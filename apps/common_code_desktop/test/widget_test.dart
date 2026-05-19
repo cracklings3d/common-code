@@ -4,8 +4,15 @@ import 'package:common_code_desktop/main.dart';
 import 'package:common_code_domain/common_code_domain.dart';
 import 'package:flutter/material.dart' show TextField;
 import 'package:flutter_test/flutter_test.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 void main() {
+  TestWidgetsFlutterBinding.ensureInitialized();
+
+  setUp(() {
+    SharedPreferences.setMockInitialValues(<String, Object>{});
+  });
+
   testWidgets('production bootstrap path renders a real session summary', (
     WidgetTester tester,
   ) async {
@@ -19,6 +26,7 @@ void main() {
     expect(find.text('Session id: desktop-session'), findsOneWidget);
     expect(find.text('Host id: desktop-host'), findsOneWidget);
     expect(find.text('Attached Client: desktop-client'), findsOneWidget);
+    expect(find.text('Attached Clients: desktop-client'), findsOneWidget);
     expect(find.text('Input Client: none'), findsOneWidget);
     expect(find.text('Prompt Thread turns: 0'), findsOneWidget);
     expect(find.text('Active Turn: none'), findsOneWidget);
@@ -126,6 +134,7 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(loader.submittedTexts, ['Submit the first desktop turn.']);
+    expect(find.text('Attached Clients: desktop-client'), findsOneWidget);
     expect(find.text('Input Client: desktop-client'), findsOneWidget);
     expect(find.text('Prompt Thread turns: 1'), findsOneWidget);
     expect(find.text('Active Turn: turn-1'), findsOneWidget);
