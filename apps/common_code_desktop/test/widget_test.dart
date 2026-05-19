@@ -147,7 +147,7 @@ void main() {
       findsOneWidget,
     );
     expect(find.text('Stored submitted turn'), findsOneWidget);
-    expect(find.text('Status: queued'), findsOneWidget);
+    expect(find.text('Lifecycle: active (queued)'), findsOneWidget);
     expect(
       find.text(
         'Next-turn authoring is unavailable while the current turn remains queued or running.',
@@ -199,7 +199,7 @@ void main() {
     expect(find.text('Current Input Client: desktop-client'), findsOneWidget);
     expect(find.text('desktop-client (local, input)'), findsOneWidget);
     expect(find.text('Submit the first desktop turn.'), findsOneWidget);
-    expect(find.text('Status: queued'), findsOneWidget);
+    expect(find.text('Lifecycle: active (queued)'), findsOneWidget);
     expect(find.byType(TextField), findsNothing);
     expect(find.text('Submit Turn'), findsNothing);
   });
@@ -228,7 +228,7 @@ void main() {
     );
     await tester.pump();
 
-    expect(find.text('Status: queued'), findsOneWidget);
+    expect(find.text('Lifecycle: active (queued)'), findsOneWidget);
     expect(find.byType(TextField), findsNothing);
     expect(find.text('Current Input Client: desktop-client'), findsOneWidget);
 
@@ -239,7 +239,7 @@ void main() {
     );
     await tester.pump();
 
-    expect(find.text('Status: running'), findsOneWidget);
+    expect(find.text('Lifecycle: active (running)'), findsOneWidget);
 
     controller.emit(
       DesktopSessionControllerState.data(
@@ -248,7 +248,7 @@ void main() {
     );
     await tester.pump();
 
-    expect(find.text('Status: completed'), findsOneWidget);
+    expect(find.text('Outcome: completed'), findsOneWidget);
     expect(find.widgetWithText(TextField, 'Next Turn'), findsOneWidget);
   });
 
@@ -274,8 +274,11 @@ void main() {
       await tester.pump();
 
       expect(find.text('Failed to load session.'), findsNothing);
-      expect(find.text('Status: failed'), findsOneWidget);
-      expect(find.text('Failure: Simulated host failure.'), findsOneWidget);
+      expect(find.text('Outcome: failed'), findsOneWidget);
+      expect(
+        find.text('Failure summary: Simulated host failure.'),
+        findsOneWidget,
+      );
       expect(find.widgetWithText(TextField, 'Next Turn'), findsOneWidget);
     },
   );
@@ -439,9 +442,9 @@ void main() {
           tester.getTopLeft(secondTextFinder).dy,
       isTrue,
     );
-    expect(find.text('Status: completed'), findsOneWidget);
-    expect(find.text('Status: failed'), findsOneWidget);
-    expect(find.text('Failure: Ordered failure.'), findsOneWidget);
+    expect(find.text('Outcome: completed'), findsOneWidget);
+    expect(find.text('Outcome: failed'), findsOneWidget);
+    expect(find.text('Failure summary: Ordered failure.'), findsOneWidget);
   });
 }
 
