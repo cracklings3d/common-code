@@ -238,8 +238,10 @@ void main() {
       ),
     );
     await tester.pump();
+    await tester.pump();
 
     expect(find.text('Lifecycle: active (running)'), findsOneWidget);
+    expect(find.text('Turn running: Stored submitted turn'), findsOneWidget);
 
     controller.emit(
       DesktopSessionControllerState.data(
@@ -247,8 +249,10 @@ void main() {
       ),
     );
     await tester.pump();
+    await tester.pump();
 
     expect(find.text('Outcome: completed'), findsOneWidget);
+    expect(find.text('Turn completed: Stored submitted turn'), findsOneWidget);
     expect(find.widgetWithText(TextField, 'Next Turn'), findsOneWidget);
   });
 
@@ -268,18 +272,77 @@ void main() {
 
       controller.emit(
         DesktopSessionControllerState.data(
+          _buildSnapshot(session: _buildRunningTurnSession()),
+        ),
+      );
+      await tester.pump();
+      await tester.pump();
+
+      controller.emit(
+        DesktopSessionControllerState.data(
           _buildSnapshot(session: _buildFailedTurnSession()),
         ),
       );
       await tester.pump();
+      await tester.pump();
 
       expect(find.text('Failed to load session.'), findsNothing);
       expect(find.text('Outcome: failed'), findsOneWidget);
+      expect(find.text('Turn failed: Stored submitted turn'), findsOneWidget);
       expect(
         find.text('Failure summary: Simulated host failure.'),
         findsOneWidget,
       );
       expect(find.widgetWithText(TextField, 'Next Turn'), findsOneWidget);
+    },
+  );
+
+  testWidgets(
+    'initial running snapshot and replayed terminal snapshot do not backfill duplicate notices',
+    (WidgetTester tester) async {
+      final controller = _FakeDesktopSessionController(
+        onInitialize: (controller) {
+          controller.emit(
+            DesktopSessionControllerState.data(
+              _buildSnapshot(session: _buildRunningTurnSession()),
+            ),
+          );
+        },
+      );
+
+      await tester.pumpWidget(
+        CommonCodeDesktopApp(sessionController: controller),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.text('Lifecycle: active (running)'), findsOneWidget);
+      expect(find.text('Turn running: Stored submitted turn'), findsNothing);
+
+      controller.emit(
+        DesktopSessionControllerState.data(
+          _buildSnapshot(session: _buildCompletedTurnSession()),
+        ),
+      );
+      await tester.pump();
+      await tester.pump();
+
+      expect(find.text('Outcome: completed'), findsOneWidget);
+      expect(
+        find.text('Turn completed: Stored submitted turn'),
+        findsOneWidget,
+      );
+
+      controller.emit(
+        DesktopSessionControllerState.data(
+          _buildSnapshot(session: _buildCompletedTurnSession()),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(
+        find.text('Turn completed: Stored submitted turn'),
+        findsOneWidget,
+      );
     },
   );
 
