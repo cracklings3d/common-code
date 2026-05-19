@@ -1,4 +1,8 @@
-enum HostServiceFailureCode { duplicateSessionId, unknownSessionId }
+enum HostServiceFailureCode {
+  duplicateSessionId,
+  unknownSessionId,
+  activeSessionWatchAlreadyExists,
+}
 
 final class HostServiceFailure implements Exception {
   const HostServiceFailure(this.code, this.message);

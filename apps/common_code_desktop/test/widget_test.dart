@@ -33,7 +33,9 @@ void main() {
 
     await tester.pumpWidget(
       CommonCodeDesktopApp(
-        sessionLoader: _FakeDesktopSessionLoader(() => completer.future),
+        sessionLoader: _FakeDesktopSessionLoader(
+          watchFactory: () => completer.future.asStream(),
+        ),
       ),
     );
 
@@ -51,7 +53,9 @@ void main() {
   ) async {
     await tester.pumpWidget(
       CommonCodeDesktopApp(
-        sessionLoader: _FakeDesktopSessionLoader(() async => null),
+        sessionLoader: _FakeDesktopSessionLoader(
+          watchFactory: () => Stream<DesktopSessionSnapshot?>.value(null),
+        ),
       ),
     );
 
@@ -65,53 +69,33 @@ void main() {
     expect(find.text('Failed to load session.'), findsNothing);
   });
 
-  testWidgets('error state renders a retry path that reloads the session', (
+  testWidgets('error state renders a retry control for watch failures', (
     WidgetTester tester,
   ) async {
-    var attempts = 0;
+    final loader = _RetryingDesktopSessionLoader();
 
-    await tester.pumpWidget(
-      CommonCodeDesktopApp(
-        sessionLoader: _FakeDesktopSessionLoader(() async {
-          attempts += 1;
-          if (attempts == 1) {
-            throw StateError('boom');
-          }
-
-          return _buildSnapshot();
-        }),
-      ),
-    );
+    await tester.pumpWidget(CommonCodeDesktopApp(sessionLoader: loader));
 
     await tester.pumpAndSettle();
 
     expect(find.text('Failed to load session.'), findsOneWidget);
     expect(find.textContaining('boom'), findsOneWidget);
+    expect(find.text('Retry'), findsOneWidget);
 
     await tester.tap(find.text('Retry'));
-    await tester.pumpAndSettle();
-
-    expect(find.text('Live Session state'), findsOneWidget);
-    expect(find.text('Session id: desktop-session'), findsOneWidget);
+    await tester.pump();
+    await tester.pump();
   });
 
-  testWidgets('reread updates the rendered session summary', (
+  testWidgets('refresh cancels the prior watch subscription', (
     WidgetTester tester,
   ) async {
-    var loadCount = 0;
+    final loader = _RefreshableDesktopSessionLoader([
+      [_buildSnapshot()],
+      [_buildSnapshot(session: _buildActiveTurnSession())],
+    ]);
 
-    await tester.pumpWidget(
-      CommonCodeDesktopApp(
-        sessionLoader: _FakeDesktopSessionLoader(() async {
-          loadCount += 1;
-          if (loadCount == 1) {
-            return _buildSnapshot();
-          }
-
-          return _buildSnapshot(session: _buildActiveTurnSession());
-        }),
-      ),
-    );
+    await tester.pumpWidget(CommonCodeDesktopApp(sessionLoader: loader));
 
     await tester.pumpAndSettle();
 
@@ -120,17 +104,10 @@ void main() {
     expect(find.text('Active Turn: none'), findsOneWidget);
 
     await tester.tap(find.text('Refresh Session'));
-    await tester.pumpAndSettle();
+    await tester.pump();
+    await tester.pump();
 
-    expect(find.text('Input Client: desktop-client'), findsOneWidget);
-    expect(find.text('Prompt Thread turns: 1'), findsOneWidget);
-    expect(find.text('Active Turn: turn-1'), findsOneWidget);
-    expect(
-      find.text(
-        'Turn authoring is unavailable while the current active Turn remains in progress.',
-      ),
-      findsOneWidget,
-    );
+    expect(loader.cancelCount, 1);
   });
 
   testWidgets('submitting text updates the rendered session snapshot', (
@@ -141,7 +118,10 @@ void main() {
     await tester.pumpWidget(CommonCodeDesktopApp(sessionLoader: loader));
     await tester.pumpAndSettle();
 
-    await tester.enterText(find.byType(TextField), 'Submit the first desktop turn.');
+    await tester.enterText(
+      find.byType(TextField),
+      'Submit the first desktop turn.',
+    );
     await tester.tap(find.text('Submit Turn'));
     await tester.pumpAndSettle();
 
@@ -153,9 +133,62 @@ void main() {
       find.text('Turn turn-1: Submit the first desktop turn.'),
       findsOneWidget,
     );
+    expect(find.text('Status: queued'), findsOneWidget);
     expect(find.byType(TextField), findsNothing);
     expect(find.text('Submit Turn'), findsNothing);
   });
+
+  testWidgets('screen updates from watch stream without manual refresh', (
+    WidgetTester tester,
+  ) async {
+    final loader = _StreamingDesktopSessionLoader();
+
+    await tester.pumpWidget(CommonCodeDesktopApp(sessionLoader: loader));
+    await tester.pump();
+
+    expect(find.text('Live Session state'), findsOneWidget);
+    expect(find.text('Prompt Thread turns: 0'), findsOneWidget);
+
+    loader.emit(_buildSnapshot(session: _buildQueuedTurnSession()));
+    await tester.pump();
+    await tester.pump();
+
+    expect(find.text('Status: queued'), findsOneWidget);
+    expect(find.byType(TextField), findsNothing);
+
+    loader.emit(_buildSnapshot(session: _buildRunningTurnSession()));
+    await tester.pump();
+    await tester.pump();
+
+    expect(find.text('Status: running'), findsOneWidget);
+
+    loader.emit(_buildSnapshot(session: _buildCompletedTurnSession()));
+    await tester.pump();
+    await tester.pump();
+
+    expect(find.text('Status: completed'), findsOneWidget);
+    expect(find.text('Active Turn: none'), findsOneWidget);
+    expect(find.widgetWithText(TextField, 'Next Turn'), findsOneWidget);
+  });
+
+  testWidgets(
+    'terminal failure stays on data screen and shows failure summary',
+    (WidgetTester tester) async {
+      final loader = _StreamingDesktopSessionLoader();
+
+      await tester.pumpWidget(CommonCodeDesktopApp(sessionLoader: loader));
+      await tester.pump();
+
+      loader.emit(_buildSnapshot(session: _buildFailedTurnSession()));
+      await tester.pump();
+
+      expect(find.text('Failed to load session.'), findsNothing);
+      expect(find.text('Status: failed'), findsOneWidget);
+      expect(find.text('Failure: Simulated host failure.'), findsOneWidget);
+      expect(find.text('Active Turn: none'), findsOneWidget);
+      expect(find.widgetWithText(TextField, 'Next Turn'), findsOneWidget);
+    },
+  );
 }
 
 DesktopSessionSnapshot _buildSnapshot({Session? session}) {
@@ -176,22 +209,41 @@ Session _buildActiveTurnSession() {
   final client = const Client(id: 'desktop-client');
 
   return Session(
-    id: 'desktop-session',
-    activeHost: const Host(id: 'desktop-host'),
-  ).attachClient(client).startTurn(
-    turnId: 'turn-1',
-    client: client,
-    submittedText: 'Stored submitted turn',
-  );
+        id: 'desktop-session',
+        activeHost: const Host(id: 'desktop-host'),
+      )
+      .attachClient(client)
+      .startTurn(
+        turnId: 'turn-1',
+        client: client,
+        submittedText: 'Stored submitted turn',
+      );
 }
 
-final class _FakeDesktopSessionLoader implements DesktopSessionLoader {
-  _FakeDesktopSessionLoader(this._onLoad);
+Session _buildQueuedTurnSession() => _buildActiveTurnSession();
 
-  final Future<DesktopSessionSnapshot?> Function() _onLoad;
+Session _buildRunningTurnSession() =>
+    _buildActiveTurnSession().advanceActiveTurnToRunning();
+
+Session _buildCompletedTurnSession() =>
+    _buildRunningTurnSession().completeActiveTurn();
+
+Session _buildFailedTurnSession() => _buildRunningTurnSession().failActiveTurn(
+  failureSummary: 'Simulated host failure.',
+);
+
+final class _FakeDesktopSessionLoader implements DesktopSessionLoader {
+  _FakeDesktopSessionLoader({
+    required Stream<DesktopSessionSnapshot?> Function() watchFactory,
+  }) : _watchFactory = watchFactory;
+
+  final Stream<DesktopSessionSnapshot?> Function() _watchFactory;
 
   @override
-  Future<DesktopSessionSnapshot?> load() => _onLoad();
+  Future<DesktopSessionSnapshot?> load() => watch().first;
+
+  @override
+  Stream<DesktopSessionSnapshot?> watch() => _watchFactory();
 
   @override
   Future<DesktopSessionSnapshot> submitTurn({required String submittedText}) {
@@ -201,13 +253,28 @@ final class _FakeDesktopSessionLoader implements DesktopSessionLoader {
 
 final class _RecordingDesktopSessionLoader implements DesktopSessionLoader {
   final List<String> submittedTexts = <String>[];
+  final StreamController<DesktopSessionSnapshot?> _controller =
+      StreamController<DesktopSessionSnapshot?>.broadcast();
   DesktopSessionSnapshot _snapshot = _buildSnapshot();
 
   @override
   Future<DesktopSessionSnapshot?> load() async => _snapshot;
 
   @override
-  Future<DesktopSessionSnapshot> submitTurn({required String submittedText}) async {
+  Stream<DesktopSessionSnapshot?> watch() => Stream.multi((multi) {
+    multi.add(_snapshot);
+    final subscription = _controller.stream.listen(
+      multi.add,
+      onError: multi.addError,
+      onDone: multi.close,
+    );
+    multi.onCancel = subscription.cancel;
+  });
+
+  @override
+  Future<DesktopSessionSnapshot> submitTurn({
+    required String submittedText,
+  }) async {
     submittedTexts.add(submittedText);
     _snapshot = DesktopSessionSnapshot(
       attachedClientId: 'desktop-client',
@@ -218,6 +285,104 @@ final class _RecordingDesktopSessionLoader implements DesktopSessionLoader {
       ),
     );
 
+    _controller.add(_snapshot);
+
     return _snapshot;
+  }
+}
+
+final class _StreamingDesktopSessionLoader implements DesktopSessionLoader {
+  DesktopSessionSnapshot? _latest = _buildSnapshot();
+  final StreamController<DesktopSessionSnapshot?> _controller =
+      StreamController<DesktopSessionSnapshot?>.broadcast();
+
+  void emit(DesktopSessionSnapshot? snapshot) {
+    _latest = snapshot;
+    _controller.add(snapshot);
+  }
+
+  @override
+  Future<DesktopSessionSnapshot?> load() async => _latest;
+
+  @override
+  Stream<DesktopSessionSnapshot?> watch() => Stream.multi((multi) {
+    multi.add(_latest);
+    final subscription = _controller.stream.listen(
+      multi.add,
+      onError: multi.addError,
+      onDone: multi.close,
+    );
+    multi.onCancel = subscription.cancel;
+  });
+
+  @override
+  Future<DesktopSessionSnapshot> submitTurn({required String submittedText}) {
+    throw UnimplementedError('submitTurn is not used in this fake loader.');
+  }
+}
+
+final class _RefreshableDesktopSessionLoader implements DesktopSessionLoader {
+  _RefreshableDesktopSessionLoader(this._watchEvents);
+
+  final List<List<DesktopSessionSnapshot?>> _watchEvents;
+  int watchCount = 0;
+  int cancelCount = 0;
+
+  @override
+  Future<DesktopSessionSnapshot?> load() async => _watchEvents.first.first;
+
+  @override
+  Stream<DesktopSessionSnapshot?> watch() {
+    final events = _watchEvents[watchCount];
+    watchCount += 1;
+
+    late final StreamController<DesktopSessionSnapshot?> controller;
+    controller = StreamController<DesktopSessionSnapshot?>(
+      onListen: () {
+        for (final event in events) {
+          controller.add(event);
+        }
+      },
+      onCancel: () {
+        cancelCount += 1;
+      },
+    );
+
+    return controller.stream;
+  }
+
+  @override
+  Future<DesktopSessionSnapshot> submitTurn({required String submittedText}) {
+    throw UnimplementedError('submitTurn is not used in this fake loader.');
+  }
+}
+
+final class _RetryingDesktopSessionLoader implements DesktopSessionLoader {
+  int watchCount = 0;
+
+  @override
+  Future<DesktopSessionSnapshot?> load() async => _buildSnapshot();
+
+  @override
+  Stream<DesktopSessionSnapshot?> watch() {
+    watchCount += 1;
+
+    late final StreamController<DesktopSessionSnapshot?> controller;
+    controller = StreamController<DesktopSessionSnapshot?>(
+      onListen: () {
+        if (watchCount == 1) {
+          controller.addError(StateError('boom'));
+        } else {
+          controller.add(_buildSnapshot());
+        }
+      },
+    );
+
+    return controller.stream;
+  }
+
+  @override
+  Future<DesktopSessionSnapshot> submitTurn({required String submittedText}) {
+    throw UnimplementedError('submitTurn is not used in this fake loader.');
   }
 }

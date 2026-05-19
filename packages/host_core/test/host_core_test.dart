@@ -51,7 +51,12 @@ void main() {
     });
 
     test('submits a turn for an attached client through the host boundary', () {
-      final service = createInMemoryHostService();
+      final service = createInMemoryHostService(
+        simulationPolicy: const HostExecutionSimulationPolicy(
+          queuedToRunningDelay: Duration(seconds: 1),
+          runningToTerminalDelay: Duration(seconds: 1),
+        ),
+      );
 
       service.createSession(sessionId: 'session-1', activeHost: host);
       service.attachClient(sessionId: 'session-1', client: client);
@@ -63,12 +68,21 @@ void main() {
       );
 
       expect(updatedSession.activeTurn?.id, 'turn-1');
-      expect(updatedSession.activeTurn?.submittedText, 'Submit the first desktop turn.');
+      expect(
+        updatedSession.activeTurn?.submittedText,
+        'Submit the first desktop turn.',
+      );
+      expect(updatedSession.activeTurn?.status, TurnStatus.queued);
       expect(updatedSession.inputClient, client);
     });
 
     test('submitTurn persists the updated session for subsequent reads', () {
-      final service = createInMemoryHostService();
+      final service = createInMemoryHostService(
+        simulationPolicy: const HostExecutionSimulationPolicy(
+          queuedToRunningDelay: Duration(seconds: 1),
+          runningToTerminalDelay: Duration(seconds: 1),
+        ),
+      );
 
       service.createSession(sessionId: 'session-1', activeHost: host);
       service.attachClient(sessionId: 'session-1', client: client);
@@ -82,11 +96,110 @@ void main() {
 
       expect(storedSession.inputClient, client);
       expect(storedSession.activeTurn?.id, 'turn-1');
-      expect(storedSession.promptThread.turns.single.submittedText, 'Stored in the shared prompt thread.');
+      expect(storedSession.activeTurn?.status, TurnStatus.queued);
+      expect(
+        storedSession.promptThread.turns.single.submittedText,
+        'Stored in the shared prompt thread.',
+      );
     });
 
-    test('submitting another turn while one is active fails explicitly', () {
-      final service = createInMemoryHostService();
+    test(
+      'watchSession emits the current stored snapshot immediately',
+      () async {
+        final service = createInMemoryHostService();
+
+        service.createSession(sessionId: 'session-1', activeHost: host);
+        service.attachClient(sessionId: 'session-1', client: client);
+
+        final snapshots = await service
+            .watchSession('session-1')
+            .take(1)
+            .toList();
+
+        expect(snapshots.single, service.readSession('session-1'));
+        expect(snapshots.single.clients, [client]);
+      },
+    );
+
+    test(
+      'simulated loop emits queued running and completed snapshots in order',
+      () async {
+        final service = createInMemoryHostService(
+          simulationPolicy: const HostExecutionSimulationPolicy(
+            queuedToRunningDelay: Duration.zero,
+            runningToTerminalDelay: Duration.zero,
+          ),
+        );
+
+        service.createSession(sessionId: 'session-1', activeHost: host);
+        service.attachClient(sessionId: 'session-1', client: client);
+
+        final snapshotsFuture = service
+            .watchSession('session-1')
+            .take(4)
+            .toList();
+
+        service.submitTurn(
+          sessionId: 'session-1',
+          client: client,
+          submittedText: 'Submit the first desktop turn.',
+        );
+
+        final snapshots = await snapshotsFuture;
+
+        expect(snapshots[0].activeTurn, isNull);
+        expect(snapshots[1].activeTurn?.status, TurnStatus.queued);
+        expect(snapshots[2].activeTurn?.status, TurnStatus.running);
+        expect(snapshots[3].activeTurn, isNull);
+        expect(
+          snapshots[3].promptThread.turns.single.status,
+          TurnStatus.completed,
+        );
+      },
+    );
+
+    test(
+      'simulated terminal failure is delivered as session data not watch error',
+      () async {
+        final service = createInMemoryHostService(
+          simulationPolicy: const HostExecutionSimulationPolicy(
+            queuedToRunningDelay: Duration.zero,
+            runningToTerminalDelay: Duration.zero,
+            terminalOutcome: SimulatedTurnTerminalOutcome.failed,
+            failureSummary: 'Simulated host failure.',
+          ),
+        );
+
+        service.createSession(sessionId: 'session-1', activeHost: host);
+        service.attachClient(sessionId: 'session-1', client: client);
+
+        final snapshotsFuture = service
+            .watchSession('session-1')
+            .take(4)
+            .toList();
+
+        service.submitTurn(
+          sessionId: 'session-1',
+          client: client,
+          submittedText: 'Submit the first desktop turn.',
+        );
+
+        final snapshots = await snapshotsFuture;
+        final failedTurn = snapshots[3].promptThread.turns.single;
+
+        expect(snapshots[3].activeTurn, isNull);
+        expect(failedTurn.status, TurnStatus.failed);
+        expect(failedTurn.failureSummary, 'Simulated host failure.');
+      },
+    );
+
+    test('submitting another turn while one is queued fails explicitly', () {
+      final service = createInMemoryHostService(
+        simulationPolicy: const HostExecutionSimulationPolicy(
+          queuedToRunningDelay: Duration(seconds: 1),
+          runningToTerminalDelay: Duration(seconds: 1),
+        ),
+      );
 
       service.createSession(sessionId: 'session-1', activeHost: host);
       service.attachClient(sessionId: 'session-1', client: client);
@@ -111,6 +224,50 @@ void main() {
         ),
       );
     });
+
+    test(
+      'submitting another turn while one is running fails explicitly',
+      () async {
+        final service = createInMemoryHostService(
+          simulationPolicy: const HostExecutionSimulationPolicy(
+            queuedToRunningDelay: Duration.zero,
+            runningToTerminalDelay: Duration(seconds: 1),
+          ),
+        );
+
+        service.createSession(sessionId: 'session-1', activeHost: host);
+        service.attachClient(sessionId: 'session-1', client: client);
+
+        final snapshotsFuture = service
+            .watchSession('session-1')
+            .take(3)
+            .toList();
+
+        service.submitTurn(
+          sessionId: 'session-1',
+          client: client,
+          submittedText: 'First active turn.',
+        );
+
+        final snapshots = await snapshotsFuture;
+        expect(snapshots[2].activeTurn?.status, TurnStatus.running);
+
+        expect(
+          () => service.submitTurn(
+            sessionId: 'session-1',
+            client: client,
+            submittedText: 'Blocked second turn.',
+          ),
+          throwsA(
+            isA<SessionFailure>().having(
+              (failure) => failure.code,
+              'code',
+              SessionFailureCode.activeTurnAlreadyExists,
+            ),
+          ),
+        );
+      },
+    );
 
     test('reading an unknown session fails explicitly', () {
       final service = createInMemoryHostService();

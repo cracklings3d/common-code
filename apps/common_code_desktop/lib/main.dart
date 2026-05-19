@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:common_code_domain/common_code_domain.dart';
 import 'package:flutter/material.dart';
 import 'package:host_core/host_core.dart';
@@ -27,6 +29,8 @@ class CommonCodeDesktopApp extends StatelessWidget {
 abstract interface class DesktopSessionLoader {
   Future<DesktopSessionSnapshot?> load();
 
+  Stream<DesktopSessionSnapshot?> watch();
+
   Future<DesktopSessionSnapshot> submitTurn({required String submittedText});
 }
 
@@ -53,21 +57,28 @@ final class DesktopHostSessionLoader implements DesktopSessionLoader {
   HostService? _service;
   bool _isBootstrapped = false;
 
+  Future<void> _bootstrapIfNeeded() async {
+    final service = _service ??= _hostService ?? createInMemoryHostService();
+
+    if (_isBootstrapped) {
+      return;
+    }
+
+    service.createSession(
+      sessionId: _sessionId,
+      activeHost: const Host(id: _hostId),
+    );
+    service.attachClient(
+      sessionId: _sessionId,
+      client: const Client(id: _attachedClientId),
+    );
+    _isBootstrapped = true;
+  }
+
   @override
   Future<DesktopSessionSnapshot?> load() async {
     final service = _service ??= _hostService ?? createInMemoryHostService();
-
-    if (!_isBootstrapped) {
-      service.createSession(
-        sessionId: _sessionId,
-        activeHost: const Host(id: _hostId),
-      );
-      service.attachClient(
-        sessionId: _sessionId,
-        client: const Client(id: _attachedClientId),
-      );
-      _isBootstrapped = true;
-    }
+    await _bootstrapIfNeeded();
 
     return DesktopSessionSnapshot(
       session: service.readSession(_sessionId),
@@ -76,12 +87,25 @@ final class DesktopHostSessionLoader implements DesktopSessionLoader {
   }
 
   @override
-  Future<DesktopSessionSnapshot> submitTurn({required String submittedText}) async {
+  Stream<DesktopSessionSnapshot?> watch() async* {
+    final service = _service ??= _hostService ?? createInMemoryHostService();
+    await _bootstrapIfNeeded();
+
+    await for (final session in service.watchSession(_sessionId)) {
+      yield DesktopSessionSnapshot(
+        session: session,
+        attachedClientId: _attachedClientId,
+      );
+    }
+  }
+
+  @override
+  Future<DesktopSessionSnapshot> submitTurn({
+    required String submittedText,
+  }) async {
     final service = _service ??= _hostService ?? createInMemoryHostService();
 
-    if (!_isBootstrapped) {
-      await load();
-    }
+    await _bootstrapIfNeeded();
 
     final session = service.submitTurn(
       sessionId: _sessionId,
@@ -109,30 +133,50 @@ class _SessionScreenState extends State<SessionScreen> {
   SessionScreenState _state = const SessionScreenLoading();
   final TextEditingController _draftController = TextEditingController();
   bool _isSubmitting = false;
+  StreamSubscription<DesktopSessionSnapshot?>? _watchSubscription;
 
   @override
   void initState() {
     super.initState();
-    _loadSession();
+    _startSessionWatch();
   }
 
-  Future<void> _loadSession() async {
+  Future<void> _startSessionWatch() async {
+    await _watchSubscription?.cancel();
+
+    if (!mounted) {
+      return;
+    }
+
     setState(() {
       _state = const SessionScreenLoading();
     });
 
     try {
-      final snapshot = await widget.sessionLoader.load();
-      if (!mounted) {
-        return;
-      }
+      final stream = widget.sessionLoader.watch();
+      _watchSubscription = stream.listen(
+        (snapshot) {
+          if (!mounted) {
+            return;
+          }
 
-      setState(() {
-        _state = switch (snapshot) {
-          null => const SessionScreenEmpty(),
-          final snapshot => SessionScreenData(snapshot),
-        };
-      });
+          setState(() {
+            _state = switch (snapshot) {
+              null => const SessionScreenEmpty(),
+              final snapshot => SessionScreenData(snapshot),
+            };
+          });
+        },
+        onError: (Object error, StackTrace stackTrace) {
+          if (!mounted) {
+            return;
+          }
+
+          setState(() {
+            _state = SessionScreenError(error.toString());
+          });
+        },
+      );
     } catch (error) {
       if (!mounted) {
         return;
@@ -152,16 +196,13 @@ class _SessionScreenState extends State<SessionScreen> {
     });
 
     try {
-      final snapshot = await widget.sessionLoader.submitTurn(
-        submittedText: draftText,
-      );
+      await widget.sessionLoader.submitTurn(submittedText: draftText);
       if (!mounted) {
         return;
       }
 
       setState(() {
         _draftController.clear();
-        _state = SessionScreenData(snapshot);
       });
     } catch (error) {
       if (!mounted) {
@@ -182,6 +223,7 @@ class _SessionScreenState extends State<SessionScreen> {
 
   @override
   void dispose() {
+    _watchSubscription?.cancel();
     _draftController.dispose();
     super.dispose();
   }
@@ -201,16 +243,16 @@ class _SessionScreenState extends State<SessionScreen> {
             child: switch (_state) {
               SessionScreenLoading() => const _SessionLoadingView(),
               SessionScreenEmpty() => _SessionEmptyView(
-                onRefresh: _loadSession,
+                onRefresh: _startSessionWatch,
               ),
               SessionScreenError(:final message) => _SessionErrorView(
                 message: message,
-                onRetry: _loadSession,
+                onRetry: _startSessionWatch,
               ),
               SessionScreenData(:final snapshot) => _SessionDataView(
                 snapshot: snapshot,
                 draftController: _draftController,
-                onRefresh: _loadSession,
+                onRefresh: _startSessionWatch,
                 onSubmitTurn: _submitTurn,
                 isSubmitting: _isSubmitting,
               ),
@@ -273,8 +315,8 @@ class _SessionEmptyView extends StatelessWidget {
         const Text('No Session was returned for the desktop app.'),
         const SizedBox(height: 16),
         FilledButton(
-          onPressed: () {
-            onRefresh();
+          onPressed: () async {
+            await onRefresh();
           },
           child: const Text('Refresh Session'),
         ),
@@ -297,8 +339,8 @@ class _SessionErrorView extends StatelessWidget {
         Text(message),
         const SizedBox(height: 16),
         FilledButton(
-          onPressed: () {
-            onRetry();
+          onPressed: () async {
+            await onRetry();
           },
           child: const Text('Retry'),
         ),
@@ -349,6 +391,9 @@ class _SessionDataView extends StatelessWidget {
           const SizedBox(height: 8),
           for (final turn in session.promptThread.turns) ...[
             Text('Turn ${turn.id}: ${turn.submittedText}'),
+            Text('Status: ${turn.status.name}'),
+            if (turn.failureSummary case final failureSummary?)
+              Text('Failure: $failureSummary'),
             const SizedBox(height: 8),
           ],
         ],
@@ -366,8 +411,8 @@ class _SessionDataView extends StatelessWidget {
           FilledButton(
             onPressed: isSubmitting
                 ? null
-                : () {
-                    onSubmitTurn();
+                : () async {
+                    await onSubmitTurn();
                   },
             child: Text(isSubmitting ? 'Submitting...' : 'Submit Turn'),
           ),
@@ -378,8 +423,8 @@ class _SessionDataView extends StatelessWidget {
         ],
         const SizedBox(height: 16),
         FilledButton(
-          onPressed: () {
-            onRefresh();
+          onPressed: () async {
+            await onRefresh();
           },
           child: const Text('Refresh Session'),
         ),
