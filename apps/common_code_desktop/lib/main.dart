@@ -46,8 +46,7 @@ class SessionScreen extends StatefulWidget {
 
 class _SessionScreenState extends State<SessionScreen> {
   final TextEditingController _draftController = TextEditingController();
-  DesktopSessionSnapshot? _lastObservedSnapshot;
-  final Set<String> _emittedTurnNoticeKeys = <String>{};
+  final Set<String> _renderedNotificationIds = <String>{};
 
   @override
   void initState() {
@@ -64,8 +63,7 @@ class _SessionScreenState extends State<SessionScreen> {
     }
 
     oldWidget.sessionController.removeListener(_handleSessionControllerUpdate);
-    _lastObservedSnapshot = null;
-    _emittedTurnNoticeKeys.clear();
+    _renderedNotificationIds.clear();
     widget.sessionController.addListener(_handleSessionControllerUpdate);
   }
 
@@ -76,17 +74,9 @@ class _SessionScreenState extends State<SessionScreen> {
     }
 
     final snapshot = state.snapshot!;
-    final previousSnapshot = _lastObservedSnapshot;
-    _lastObservedSnapshot = snapshot;
-
-    if (previousSnapshot == null) {
-      return;
-    }
-
-    final notices = _deriveTurnTransitionNotices(
-      previousSnapshot: previousSnapshot,
-      currentSnapshot: snapshot,
-      emittedNoticeKeys: _emittedTurnNoticeKeys,
+    final notices = _consumeSessionNotifications(
+      session: snapshot.session,
+      renderedNotificationIds: _renderedNotificationIds,
     );
 
     if (notices.isEmpty) {
@@ -103,8 +93,9 @@ class _SessionScreenState extends State<SessionScreen> {
         return;
       }
 
+      messenger.removeCurrentSnackBar();
+
       for (final notice in notices) {
-        messenger.hideCurrentSnackBar();
         messenger.showSnackBar(SnackBar(content: Text(notice.message)));
       }
     });
@@ -187,33 +178,26 @@ class _SessionScreenState extends State<SessionScreen> {
   }
 }
 
-List<_TurnTransitionNotice> _deriveTurnTransitionNotices({
-  required DesktopSessionSnapshot previousSnapshot,
-  required DesktopSessionSnapshot currentSnapshot,
-  required Set<String> emittedNoticeKeys,
+List<_TurnTransitionNotice> _consumeSessionNotifications({
+  required Session session,
+  required Set<String> renderedNotificationIds,
 }) {
-  final previousTurns = {
-    for (final turn in previousSnapshot.session.promptThread.turns)
-      turn.id: turn,
+  final turnsById = {
+    for (final turn in session.promptThread.turns) turn.id: turn,
   };
   final notices = <_TurnTransitionNotice>[];
 
-  for (final turn in currentSnapshot.session.promptThread.turns) {
-    final previousTurn = previousTurns[turn.id];
-    if (previousTurn == null || previousTurn.status == turn.status) {
+  for (final notification in session.notifications) {
+    if (notification.isAcknowledged ||
+        !renderedNotificationIds.add(notification.id)) {
       continue;
     }
 
-    final notice = _TurnTransitionNotice.fromTransition(
-      previousTurn: previousTurn,
-      currentTurn: turn,
+    final notice = _TurnTransitionNotice.fromNotification(
+      notification: notification,
+      turn: turnsById[notification.turnId],
     );
     if (notice == null) {
-      continue;
-    }
-
-    final noticeKey = '${turn.id}:${turn.status.name}';
-    if (!emittedNoticeKeys.add(noticeKey)) {
       continue;
     }
 
@@ -226,21 +210,25 @@ List<_TurnTransitionNotice> _deriveTurnTransitionNotices({
 final class _TurnTransitionNotice {
   const _TurnTransitionNotice._({required this.message});
 
-  static _TurnTransitionNotice? fromTransition({
-    required Turn previousTurn,
-    required Turn currentTurn,
+  static _TurnTransitionNotice? fromNotification({
+    required SessionNotification notification,
+    required Turn? turn,
   }) {
-    return switch ((previousTurn.status, currentTurn.status)) {
-      (TurnStatus.queued, TurnStatus.running) => _TurnTransitionNotice._(
-        message: 'Turn running: ${currentTurn.submittedText}',
+    if (turn == null) {
+      return null;
+    }
+
+    return switch (notification.transition) {
+      SessionNotificationTransition.queuedToRunning => _TurnTransitionNotice._(
+        message: 'Turn running: ${turn.submittedText}',
       ),
-      (TurnStatus.running, TurnStatus.completed) => _TurnTransitionNotice._(
-        message: 'Turn completed: ${currentTurn.submittedText}',
+      SessionNotificationTransition.runningToCompleted =>
+        _TurnTransitionNotice._(
+          message: 'Turn completed: ${turn.submittedText}',
+        ),
+      SessionNotificationTransition.runningToFailed => _TurnTransitionNotice._(
+        message: 'Turn failed: ${turn.submittedText}',
       ),
-      (TurnStatus.running, TurnStatus.failed) => _TurnTransitionNotice._(
-        message: 'Turn failed: ${currentTurn.submittedText}',
-      ),
-      _ => null,
     };
   }
 

@@ -23,6 +23,7 @@ void main() {
       expect(session.activeHost, host);
       expect(session.activeTurn, isNull);
       expect(session.inputClient, isNull);
+      expect(session.notifications, isEmpty);
     });
 
     test('replaces the active host while preserving a single active host', () {
@@ -170,6 +171,13 @@ void main() {
           submittedText: 'First submitted turn',
         ),
       ]);
+      expect(updatedSession.notifications, [
+        SessionNotification.forTransition(
+          sessionId: 'session-1',
+          turnId: 'turn-1',
+          transition: SessionNotificationTransition.queuedToRunning,
+        ),
+      ]);
     });
 
     test('completes the active turn and returns to a no-active-turn state', () {
@@ -190,6 +198,18 @@ void main() {
           id: 'turn-1',
           clientId: 'client-a',
           submittedText: 'First submitted turn',
+        ),
+      ]);
+      expect(updatedSession.notifications, [
+        SessionNotification.forTransition(
+          sessionId: 'session-1',
+          turnId: 'turn-1',
+          transition: SessionNotificationTransition.queuedToRunning,
+        ),
+        SessionNotification.forTransition(
+          sessionId: 'session-1',
+          turnId: 'turn-1',
+          transition: SessionNotificationTransition.runningToCompleted,
         ),
       ]);
     });
@@ -229,6 +249,72 @@ void main() {
             failureSummary: 'Simulated host failure.',
           ),
         ]);
+        expect(updatedSession.notifications, [
+          SessionNotification.forTransition(
+            sessionId: 'session-1',
+            turnId: 'turn-1',
+            transition: SessionNotificationTransition.queuedToRunning,
+          ),
+          SessionNotification.forTransition(
+            sessionId: 'session-1',
+            turnId: 'turn-1',
+            transition: SessionNotificationTransition.runningToFailed,
+          ),
+        ]);
+      },
+    );
+
+    test(
+      'preserves ordered notifications for sequential qualifying transitions',
+      () {
+        final updatedSession = buildSession()
+            .startTurn(
+              turnId: 'turn-1',
+              client: clientA,
+              submittedText: 'First submitted turn',
+            )
+            .advanceActiveTurnToRunning()
+            .completeActiveTurn();
+
+        expect(
+          updatedSession.notifications.map(
+            (notification) => notification.transition,
+          ),
+          [
+            SessionNotificationTransition.queuedToRunning,
+            SessionNotificationTransition.runningToCompleted,
+          ],
+        );
+      },
+    );
+
+    test(
+      'reusing already-emitted session state does not mint duplicate notifications',
+      () {
+        final existingNotification = SessionNotification.forTransition(
+          sessionId: 'session-1',
+          turnId: 'turn-1',
+          transition: SessionNotificationTransition.queuedToRunning,
+        );
+        final session = Session(
+          id: 'session-1',
+          activeHost: host,
+          clients: const [clientA],
+          promptThread: PromptThread(
+            turns: const [
+              Turn.running(
+                id: 'turn-1',
+                clientId: 'client-a',
+                submittedText: 'First submitted turn',
+              ),
+            ],
+          ),
+          notifications: [existingNotification],
+        );
+
+        final reusedSession = session.replaceActiveHost(backupHost);
+
+        expect(reusedSession.notifications, [existingNotification]);
       },
     );
 
@@ -366,6 +452,14 @@ void main() {
         );
         expect(host, isA<Host>());
         expect(clientA, isA<Client>());
+        expect(
+          SessionNotification.forTransition(
+            sessionId: 'session-1',
+            turnId: 'turn-1',
+            transition: SessionNotificationTransition.queuedToRunning,
+          ),
+          isA<SessionNotification>(),
+        );
         expect(
           const SessionFailure(SessionFailureCode.noActiveTurn, 'message'),
           isA<SessionFailure>(),

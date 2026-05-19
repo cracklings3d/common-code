@@ -1,4 +1,3 @@
-import 'dart:async';
 import 'dart:convert';
 
 import 'package:common_code_desktop/src/desktop_session_controller.dart';
@@ -16,7 +15,7 @@ void main() {
     const codec = DesktopSessionSnapshotJsonCodec();
 
     test(
-      'round-trips valid session data without storing input client field',
+      'round-trips schema 2 notifications without storing input client field',
       () {
         final encoded = codec.encode(_runningRestoredSession());
         final decoded = codec.decode(
@@ -25,6 +24,7 @@ void main() {
         );
 
         expect(encoded.containsKey('inputClient'), isFalse);
+        expect(encoded['schemaVersion'], 2);
         expect(decoded.id, 'restored-session');
         expect(decoded.activeHost.id, 'restored-host');
         expect(decoded.clients.map((client) => client.id).toList(), [
@@ -41,6 +41,7 @@ void main() {
         ]);
         expect(decoded.activeTurn?.id, 'turn-2');
         expect(decoded.inputClient?.id, 'reviewer-client');
+        expect(decoded.notifications, _runningRestoredSession().notifications);
       },
     );
 
@@ -70,6 +71,57 @@ void main() {
         throwsA(isA<FormatException>()),
       );
     });
+
+    test('schema 1 restore yields empty notifications', () {
+      final decoded = codec.decode(<String, Object?>{
+        'schemaVersion': 1,
+        'sessionId': 'restored-session',
+        'activeHostId': 'restored-host',
+        'clientIds': ['desktop-client', 'reviewer-client'],
+        'turns': <Map<String, Object?>>[
+          {
+            'id': 'turn-1',
+            'clientId': 'reviewer-client',
+            'submittedText': 'First submitted turn',
+            'status': 'completed',
+            'failureSummary': null,
+          },
+          {
+            'id': 'turn-2',
+            'clientId': 'reviewer-client',
+            'submittedText': 'Second submitted turn',
+            'status': 'running',
+            'failureSummary': null,
+          },
+        ],
+      }, desktopClientId: 'desktop-client');
+
+      expect(decoded.notifications, isEmpty);
+      expect(decoded.activeTurn?.status, TurnStatus.running);
+    });
+
+    test(
+      'schema 1 restore does not synthesize notifications from turn state',
+      () {
+        final decoded = codec.decode(<String, Object?>{
+          'schemaVersion': 1,
+          'sessionId': 'restored-session',
+          'activeHostId': 'restored-host',
+          'clientIds': ['desktop-client', 'reviewer-client'],
+          'turns': <Map<String, Object?>>[
+            {
+              'id': 'turn-1',
+              'clientId': 'reviewer-client',
+              'submittedText': 'Failed submitted turn',
+              'status': 'failed',
+              'failureSummary': 'Restored failure.',
+            },
+          ],
+        }, desktopClientId: 'desktop-client');
+
+        expect(decoded.notifications, isEmpty);
+      },
+    );
   });
 
   group('SharedPreferencesDesktopSessionSnapshotStore', () {
@@ -229,6 +281,7 @@ void main() {
           controller.state.snapshot!.session.inputClient?.id,
           'reviewer-client',
         );
+        expect(controller.state.snapshot!.session.notifications, isEmpty);
         expect(
           hostService.readSession('restored-session').activeTurn?.status,
           TurnStatus.queued,
@@ -264,6 +317,10 @@ void main() {
           'reviewer-client',
         );
         expect(
+          controller.state.snapshot!.session.notifications,
+          _runningRestoredSession().notifications,
+        );
+        expect(
           hostService.readSession('restored-session').activeTurn?.status,
           TurnStatus.running,
         );
@@ -282,6 +339,10 @@ void main() {
 
       expect(controller.state.snapshot!.session.activeTurn, isNull);
       expect(controller.state.snapshot!.session.inputClient, isNull);
+      expect(
+        controller.state.snapshot!.session.notifications,
+        _completedRestoredSession().notifications,
+      );
     });
 
     test('restored failed snapshot keeps input client at none', () async {
@@ -296,6 +357,10 @@ void main() {
 
       expect(controller.state.snapshot!.session.activeTurn, isNull);
       expect(controller.state.snapshot!.session.inputClient, isNull);
+      expect(
+        controller.state.snapshot!.session.notifications,
+        _failedRestoredSession().notifications,
+      );
       expect(
         controller
             .state

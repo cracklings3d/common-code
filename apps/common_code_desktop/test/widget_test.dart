@@ -249,7 +249,8 @@ void main() {
       ),
     );
     await tester.pump();
-    await tester.pump();
+    await tester.pump(const Duration(seconds: 4));
+    await tester.pumpAndSettle();
 
     expect(find.text('Outcome: completed'), findsOneWidget);
     expect(find.text('Turn completed: Stored submitted turn'), findsOneWidget);
@@ -284,7 +285,8 @@ void main() {
         ),
       );
       await tester.pump();
-      await tester.pump();
+      await tester.pump(const Duration(seconds: 4));
+      await tester.pumpAndSettle();
 
       expect(find.text('Failed to load session.'), findsNothing);
       expect(find.text('Outcome: failed'), findsOneWidget);
@@ -298,7 +300,7 @@ void main() {
   );
 
   testWidgets(
-    'initial running snapshot and replayed terminal snapshot do not backfill duplicate notices',
+    'initial running snapshot renders existing notification once and replay does not duplicate it',
     (WidgetTester tester) async {
       final controller = _FakeDesktopSessionController(
         onInitialize: (controller) {
@@ -316,7 +318,16 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(find.text('Lifecycle: active (running)'), findsOneWidget);
-      expect(find.text('Turn running: Stored submitted turn'), findsNothing);
+      expect(find.text('Turn running: Stored submitted turn'), findsOneWidget);
+
+      controller.emit(
+        DesktopSessionControllerState.data(
+          _buildSnapshot(session: _buildRunningTurnSession()),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.text('Turn running: Stored submitted turn'), findsOneWidget);
 
       controller.emit(
         DesktopSessionControllerState.data(
@@ -324,7 +335,8 @@ void main() {
         ),
       );
       await tester.pump();
-      await tester.pump();
+      await tester.pump(const Duration(seconds: 4));
+      await tester.pumpAndSettle();
 
       expect(find.text('Outcome: completed'), findsOneWidget);
       expect(
@@ -339,6 +351,34 @@ void main() {
       );
       await tester.pumpAndSettle();
 
+      expect(
+        find.text('Turn completed: Stored submitted turn'),
+        findsOneWidget,
+      );
+    },
+  );
+
+  testWidgets(
+    'initial completed snapshot renders existing notifications without local diff state',
+    (WidgetTester tester) async {
+      final controller = _FakeDesktopSessionController(
+        onInitialize: (controller) {
+          controller.emit(
+            DesktopSessionControllerState.data(
+              _buildSnapshot(session: _buildCompletedTurnSession()),
+            ),
+          );
+        },
+      );
+
+      await tester.pumpWidget(
+        CommonCodeDesktopApp(sessionController: controller),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.text('Turn running: Stored submitted turn'), findsOneWidget);
+      await tester.pump(const Duration(seconds: 4));
+      await tester.pumpAndSettle();
       expect(
         find.text('Turn completed: Stored submitted turn'),
         findsOneWidget,

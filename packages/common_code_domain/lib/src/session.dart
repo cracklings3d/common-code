@@ -2,6 +2,7 @@ import 'client.dart';
 import 'host.dart';
 import 'prompt_thread.dart';
 import 'session_failure.dart';
+import 'session_notification.dart';
 import 'turn.dart';
 
 final class Session {
@@ -10,16 +11,20 @@ final class Session {
     required this.activeHost,
     Iterable<Client> clients = const [],
     PromptThread? promptThread,
+    Iterable<SessionNotification> notifications = const [],
   }) : clients = List.unmodifiable(clients),
-       promptThread = promptThread ?? PromptThread() {
+       promptThread = promptThread ?? PromptThread(),
+       notifications = List.unmodifiable(notifications) {
     _validateClientIdsAreUnique(this.clients);
     _validateActiveTurnInputClient(this.clients, this.promptThread);
+    _validateNotificationIdsAreUnique(this.notifications);
   }
 
   final String id;
   final Host activeHost;
   final List<Client> clients;
   final PromptThread promptThread;
+  final List<SessionNotification> notifications;
 
   Turn? get activeTurn => promptThread.activeTurn;
 
@@ -38,6 +43,7 @@ final class Session {
       activeHost: nextHost,
       clients: clients,
       promptThread: promptThread,
+      notifications: notifications,
     );
   }
 
@@ -54,6 +60,7 @@ final class Session {
       activeHost: activeHost,
       clients: [...clients, client],
       promptThread: promptThread,
+      notifications: notifications,
     );
   }
 
@@ -87,6 +94,7 @@ final class Session {
           submittedText: submittedText,
         ),
       ),
+      notifications: notifications,
     );
   }
 
@@ -145,6 +153,17 @@ final class Session {
     }
   }
 
+  static void _validateNotificationIdsAreUnique(
+    List<SessionNotification> notifications,
+  ) {
+    final notificationIds = notifications
+        .map((notification) => notification.id)
+        .toSet();
+    if (notificationIds.length != notifications.length) {
+      throw StateError('A session cannot contain duplicate notification ids.');
+    }
+  }
+
   Session _replaceActiveTurn(Turn Function(Turn currentTurn) updateTurn) {
     final currentTurn = activeTurn;
     if (currentTurn == null) {
@@ -154,9 +173,11 @@ final class Session {
       );
     }
 
+    final updatedTurn = updateTurn(currentTurn);
+
     final updatedTurns = [
       for (final turn in promptThread.turns)
-        if (turn.id == currentTurn.id) updateTurn(currentTurn) else turn,
+        if (turn.id == currentTurn.id) updatedTurn else turn,
     ];
 
     return Session(
@@ -164,12 +185,54 @@ final class Session {
       activeHost: activeHost,
       clients: clients,
       promptThread: PromptThread(turns: updatedTurns),
+      notifications: _appendNotificationForTransition(
+        previousTurn: currentTurn,
+        updatedTurn: updatedTurn,
+      ),
     );
+  }
+
+  List<SessionNotification> _appendNotificationForTransition({
+    required Turn previousTurn,
+    required Turn updatedTurn,
+  }) {
+    final transition = switch ((previousTurn.status, updatedTurn.status)) {
+      (TurnStatus.queued, TurnStatus.running) =>
+        SessionNotificationTransition.queuedToRunning,
+      (TurnStatus.running, TurnStatus.completed) =>
+        SessionNotificationTransition.runningToCompleted,
+      (TurnStatus.running, TurnStatus.failed) =>
+        SessionNotificationTransition.runningToFailed,
+      _ => null,
+    };
+    if (transition == null) {
+      return notifications;
+    }
+
+    final notificationId = SessionNotification.deterministicId(
+      sessionId: id,
+      turnId: updatedTurn.id,
+      transition: transition,
+    );
+    if (notifications.any(
+      (notification) => notification.id == notificationId,
+    )) {
+      return notifications;
+    }
+
+    return [
+      ...notifications,
+      SessionNotification.forTransition(
+        sessionId: id,
+        turnId: updatedTurn.id,
+        transition: transition,
+      ),
+    ];
   }
 
   @override
   String toString() {
     return 'Session(id: $id, activeHost: $activeHost, clients: $clients, '
-        'promptThread: $promptThread)';
+        'promptThread: $promptThread, notifications: $notifications)';
   }
 }

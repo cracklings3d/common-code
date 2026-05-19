@@ -142,7 +142,10 @@ void main() {
       ).attachClient(client);
 
       service.restoreSession(restoredSession);
-      final snapshots = await service.watchSession('restored-session').take(1).toList();
+      final snapshots = await service
+          .watchSession('restored-session')
+          .take(1)
+          .toList();
 
       expect(snapshots.single, same(restoredSession));
     });
@@ -156,18 +159,20 @@ void main() {
             runningToTerminalDelay: Duration.zero,
           ),
         );
-        final restoredSession = Session(
-          id: 'restored-session',
-          activeHost: host,
-        ).attachClient(client).startTurn(
-          turnId: 'turn-1',
-          client: client,
-          submittedText: 'Restored queued turn.',
-        );
+        final restoredSession =
+            Session(id: 'restored-session', activeHost: host)
+                .attachClient(client)
+                .startTurn(
+                  turnId: 'turn-1',
+                  client: client,
+                  submittedText: 'Restored queued turn.',
+                );
 
         service.restoreSession(restoredSession);
         final snapshots = <Session>[];
-        final subscription = service.watchSession('restored-session').listen(snapshots.add);
+        final subscription = service
+            .watchSession('restored-session')
+            .listen(snapshots.add);
         await Future<void>.delayed(const Duration(milliseconds: 50));
         await subscription.cancel();
 
@@ -210,6 +215,15 @@ void main() {
           snapshots[3].promptThread.turns.single.status,
           TurnStatus.completed,
         );
+        expect(
+          snapshots[3].notifications.map(
+            (notification) => notification.transition,
+          ),
+          [
+            SessionNotificationTransition.queuedToRunning,
+            SessionNotificationTransition.runningToCompleted,
+          ],
+        );
       },
     );
 
@@ -245,6 +259,52 @@ void main() {
         expect(snapshots[3].activeTurn, isNull);
         expect(failedTurn.status, TurnStatus.failed);
         expect(failedTurn.failureSummary, 'Simulated host failure.');
+        expect(
+          snapshots[3].notifications.map(
+            (notification) => notification.transition,
+          ),
+          [
+            SessionNotificationTransition.queuedToRunning,
+            SessionNotificationTransition.runningToFailed,
+          ],
+        );
+      },
+    );
+
+    test(
+      're-observing stored session state does not duplicate notifications',
+      () async {
+        final service = createInMemoryHostService(
+          simulationPolicy: const HostExecutionSimulationPolicy(
+            queuedToRunningDelay: Duration.zero,
+            runningToTerminalDelay: Duration.zero,
+          ),
+        );
+
+        service.createSession(sessionId: 'session-1', activeHost: host);
+        service.attachClient(sessionId: 'session-1', client: client);
+
+        final firstSnapshots = service
+            .watchSession('session-1')
+            .take(4)
+            .toList();
+        service.submitTurn(
+          sessionId: 'session-1',
+          client: client,
+          submittedText: 'Observe once.',
+        );
+        final completedSession = (await firstSnapshots).last;
+
+        final secondSnapshots = await service
+            .watchSession('session-1')
+            .take(1)
+            .toList();
+
+        expect(
+          secondSnapshots.single.notifications,
+          completedSession.notifications,
+        );
+        expect(secondSnapshots.single.notifications, hasLength(2));
       },
     );
 
@@ -362,9 +422,8 @@ void main() {
       service.createSession(sessionId: 'session-1', activeHost: host);
 
       expect(
-        () => service.restoreSession(
-          Session(id: 'session-1', activeHost: host),
-        ),
+        () =>
+            service.restoreSession(Session(id: 'session-1', activeHost: host)),
         throwsA(
           isA<HostServiceFailure>().having(
             (failure) => failure.code,
