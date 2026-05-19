@@ -5,6 +5,8 @@ abstract interface class HostService {
 
   Session attachClient({required String sessionId, required Client client});
 
+  Stream<Session> watchSession(String sessionId);
+
   Session submitTurn({
     required String sessionId,
     required Client client,

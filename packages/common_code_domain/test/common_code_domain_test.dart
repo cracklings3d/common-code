@@ -66,15 +66,16 @@ void main() {
     });
 
     test('attaching a non-input client preserves an active turn invariant', () {
-      final session = Session(
-        id: 'session-1',
-        activeHost: host,
-        clients: const [clientA],
-      ).startTurn(
-        turnId: 'turn-1',
-        client: clientA,
-        submittedText: 'Existing submitted turn',
-      );
+      final session =
+          Session(
+            id: 'session-1',
+            activeHost: host,
+            clients: const [clientA],
+          ).startTurn(
+            turnId: 'turn-1',
+            client: clientA,
+            submittedText: 'Existing submitted turn',
+          );
 
       final updatedSession = session.attachClient(clientB);
 
@@ -96,7 +97,7 @@ void main() {
 
         expect(
           updatedSession.activeTurn,
-          const Turn.active(
+          const Turn.queued(
             id: 'turn-1',
             clientId: 'client-a',
             submittedText: 'First submitted turn',
@@ -104,7 +105,7 @@ void main() {
         );
         expect(updatedSession.inputClient, clientA);
         expect(updatedSession.promptThread.turns, [
-          const Turn.active(
+          const Turn.queued(
             id: 'turn-1',
             clientId: 'client-a',
             submittedText: 'First submitted turn',
@@ -151,12 +152,34 @@ void main() {
       );
     });
 
-    test('completes the active turn and returns to a no-active-turn state', () {
+    test('advancing the active turn to running preserves one active turn', () {
       final session = buildSession().startTurn(
         turnId: 'turn-1',
         client: clientA,
         submittedText: 'First submitted turn',
       );
+
+      final updatedSession = session.advanceActiveTurnToRunning();
+
+      expect(updatedSession.activeTurn?.status, TurnStatus.running);
+      expect(updatedSession.inputClient, clientA);
+      expect(updatedSession.promptThread.turns, [
+        const Turn.running(
+          id: 'turn-1',
+          clientId: 'client-a',
+          submittedText: 'First submitted turn',
+        ),
+      ]);
+    });
+
+    test('completes the active turn and returns to a no-active-turn state', () {
+      final session = buildSession()
+          .startTurn(
+            turnId: 'turn-1',
+            client: clientA,
+            submittedText: 'First submitted turn',
+          )
+          .advanceActiveTurnToRunning();
 
       final updatedSession = session.completeActiveTurn();
 
@@ -171,13 +194,66 @@ void main() {
       ]);
     });
 
+    test('rejects completing a queued turn before it starts running', () {
+      final session = buildSession().startTurn(
+        turnId: 'turn-1',
+        client: clientA,
+        submittedText: 'First submitted turn',
+      );
+
+      expect(session.completeActiveTurn, throwsA(isA<StateError>()));
+    });
+
+    test(
+      'failing the active turn returns to no-active-turn state and preserves failure summary',
+      () {
+        final session = buildSession()
+            .startTurn(
+              turnId: 'turn-1',
+              client: clientA,
+              submittedText: 'First submitted turn',
+            )
+            .advanceActiveTurnToRunning();
+
+        final updatedSession = session.failActiveTurn(
+          failureSummary: 'Simulated host failure.',
+        );
+
+        expect(updatedSession.activeTurn, isNull);
+        expect(updatedSession.inputClient, isNull);
+        expect(updatedSession.promptThread.turns, [
+          const Turn.failed(
+            id: 'turn-1',
+            clientId: 'client-a',
+            submittedText: 'First submitted turn',
+            failureSummary: 'Simulated host failure.',
+          ),
+        ]);
+      },
+    );
+
+    test('rejects failing a queued turn before it starts running', () {
+      final session = buildSession().startTurn(
+        turnId: 'turn-1',
+        client: clientA,
+        submittedText: 'First submitted turn',
+      );
+
+      expect(
+        () => session.failActiveTurn(failureSummary: 'Simulated host failure.'),
+        throwsA(isA<StateError>()),
+      );
+    });
+
     test('preserves ordered prompt-thread history across turn transitions', () {
       final firstTurnSession = buildSession().startTurn(
         turnId: 'turn-1',
         client: clientA,
         submittedText: 'First submitted turn',
       );
-      final completedFirstTurnSession = firstTurnSession.completeActiveTurn();
+      final completedFirstTurnSession = firstTurnSession
+          .advanceActiveTurnToRunning()
+          .completeActiveTurn();
 
       final secondTurnSession = completedFirstTurnSession.startTurn(
         turnId: 'turn-2',
@@ -191,7 +267,7 @@ void main() {
           clientId: 'client-a',
           submittedText: 'First submitted turn',
         ),
-        const Turn.active(
+        const Turn.queued(
           id: 'turn-2',
           clientId: 'client-b',
           submittedText: 'Second submitted turn',
@@ -207,6 +283,7 @@ void main() {
         submittedText: 'First submitted turn',
       );
       final secondTurnSession = firstTurnSession
+          .advanceActiveTurnToRunning()
           .completeActiveTurn()
           .startTurn(
             turnId: 'turn-2',
@@ -247,7 +324,7 @@ void main() {
             clients: const [clientA],
             promptThread: PromptThread(
               turns: const [
-                Turn.active(
+                Turn.queued(
                   id: 'turn-1',
                   clientId: 'missing-client',
                   submittedText: 'Missing client turn',
@@ -280,7 +357,7 @@ void main() {
         expect(session, isA<Session>());
         expect(promptThread, isA<PromptThread>());
         expect(
-          const Turn.active(
+          const Turn.queued(
             id: 'turn-1',
             clientId: 'client-a',
             submittedText: 'Entry point turn',

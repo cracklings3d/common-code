@@ -81,7 +81,7 @@ final class Session {
       activeHost: activeHost,
       clients: clients,
       promptThread: promptThread.append(
-        Turn.active(
+        Turn.queued(
           id: turnId,
           clientId: client.id,
           submittedText: submittedText,
@@ -90,26 +90,16 @@ final class Session {
     );
   }
 
+  Session advanceActiveTurnToRunning() {
+    return _replaceActiveTurn((turn) => turn.queueToRunning());
+  }
+
   Session completeActiveTurn() {
-    final currentTurn = activeTurn;
-    if (currentTurn == null) {
-      throw const SessionFailure(
-        SessionFailureCode.noActiveTurn,
-        'Cannot complete a turn when no active turn exists.',
-      );
-    }
+    return _replaceActiveTurn((turn) => turn.complete());
+  }
 
-    final updatedTurns = [
-      for (final turn in promptThread.turns)
-        if (turn.id == currentTurn.id) currentTurn.complete() else turn,
-    ];
-
-    return Session(
-      id: id,
-      activeHost: activeHost,
-      clients: clients,
-      promptThread: PromptThread(turns: updatedTurns),
-    );
+  Session failActiveTurn({required String failureSummary}) {
+    return _replaceActiveTurn((turn) => turn.fail(failureSummary));
   }
 
   bool _hasAttachedClient(String clientId) => _clientById(clientId) != null;
@@ -153,6 +143,28 @@ final class Session {
         'session.',
       );
     }
+  }
+
+  Session _replaceActiveTurn(Turn Function(Turn currentTurn) updateTurn) {
+    final currentTurn = activeTurn;
+    if (currentTurn == null) {
+      throw const SessionFailure(
+        SessionFailureCode.noActiveTurn,
+        'Cannot update a turn when no active turn exists.',
+      );
+    }
+
+    final updatedTurns = [
+      for (final turn in promptThread.turns)
+        if (turn.id == currentTurn.id) updateTurn(currentTurn) else turn,
+    ];
+
+    return Session(
+      id: id,
+      activeHost: activeHost,
+      clients: clients,
+      promptThread: PromptThread(turns: updatedTurns),
+    );
   }
 
   @override
