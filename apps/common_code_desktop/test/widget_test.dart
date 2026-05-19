@@ -14,26 +14,25 @@ void main() {
     SharedPreferences.setMockInitialValues(<String, Object>{});
   });
 
-  testWidgets('production bootstrap path renders a real session summary', (
-    WidgetTester tester,
-  ) async {
-    await tester.pumpWidget(CommonCodeDesktopApp());
+  testWidgets(
+    'production bootstrap path renders a prompt thread conversation',
+    (WidgetTester tester) async {
+      await tester.pumpWidget(CommonCodeDesktopApp());
 
-    expect(find.text('Loading session...'), findsOneWidget);
+      expect(find.text('Loading session...'), findsOneWidget);
 
-    await tester.pumpAndSettle();
+      await tester.pumpAndSettle();
 
-    expect(find.text('Live Session state'), findsOneWidget);
-    expect(find.text('Session id: desktop-session'), findsOneWidget);
-    expect(find.text('Host id: desktop-host'), findsOneWidget);
-    expect(find.text('Attached Client: desktop-client'), findsOneWidget);
-    expect(find.text('Attached Clients: desktop-client'), findsOneWidget);
-    expect(find.text('Input Client: none'), findsOneWidget);
-    expect(find.text('Prompt Thread turns: 0'), findsOneWidget);
-    expect(find.text('Active Turn: none'), findsOneWidget);
-    expect(find.widgetWithText(TextField, 'Next Turn'), findsOneWidget);
-    expect(find.text('Submit Turn'), findsOneWidget);
-  });
+      expect(find.text('Prompt Thread'), findsOneWidget);
+      expect(find.text('No turns yet'), findsOneWidget);
+      expect(
+        find.text('Submit the next turn to start this Prompt Thread.'),
+        findsOneWidget,
+      );
+      expect(find.widgetWithText(TextField, 'Next Turn'), findsOneWidget);
+      expect(find.text('Submit Turn'), findsOneWidget);
+    },
+  );
 
   testWidgets('loading state is visible before the screen settles', (
     WidgetTester tester,
@@ -51,12 +50,12 @@ void main() {
     );
 
     expect(find.text('Loading session...'), findsOneWidget);
-    expect(find.text('Live Session state'), findsNothing);
+    expect(find.text('Prompt Thread'), findsNothing);
 
     completer.complete();
     await tester.pumpAndSettle();
 
-    expect(find.text('Live Session state'), findsOneWidget);
+    expect(find.text('Prompt Thread'), findsOneWidget);
   });
 
   testWidgets('empty state renders a distinct empty message', (
@@ -105,7 +104,7 @@ void main() {
     await tester.tap(find.text('Retry'));
     await tester.pumpAndSettle();
 
-    expect(find.text('Live Session state'), findsOneWidget);
+    expect(find.text('Prompt Thread'), findsOneWidget);
   });
 
   testWidgets('refresh updates the rendered session through the controller', (
@@ -129,14 +128,19 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    expect(find.text('Prompt Thread turns: 0'), findsOneWidget);
-    expect(find.text('Active Turn: none'), findsOneWidget);
+    expect(find.text('No turns yet'), findsOneWidget);
 
     await tester.tap(find.text('Refresh Session'));
     await tester.pumpAndSettle();
 
-    expect(find.text('Prompt Thread turns: 1'), findsOneWidget);
-    expect(find.text('Active Turn: turn-1'), findsOneWidget);
+    expect(find.text('Stored submitted turn'), findsOneWidget);
+    expect(find.text('Status: queued'), findsOneWidget);
+    expect(
+      find.text(
+        'Next-turn authoring is unavailable while the current turn remains queued or running.',
+      ),
+      findsOneWidget,
+    );
     expect(find.byType(TextField), findsNothing);
   });
 
@@ -177,14 +181,8 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(controller.submittedTexts, ['Submit the first desktop turn.']);
-    expect(find.text('Attached Clients: desktop-client'), findsOneWidget);
-    expect(find.text('Input Client: desktop-client'), findsOneWidget);
-    expect(find.text('Prompt Thread turns: 1'), findsOneWidget);
-    expect(find.text('Active Turn: turn-1'), findsOneWidget);
-    expect(
-      find.text('Turn turn-1: Submit the first desktop turn.'),
-      findsOneWidget,
-    );
+    expect(find.text('This desktop client'), findsOneWidget);
+    expect(find.text('Submit the first desktop turn.'), findsOneWidget);
     expect(find.text('Status: queued'), findsOneWidget);
     expect(find.byType(TextField), findsNothing);
     expect(find.text('Submit Turn'), findsNothing);
@@ -204,8 +202,8 @@ void main() {
     );
     await tester.pump();
 
-    expect(find.text('Live Session state'), findsOneWidget);
-    expect(find.text('Prompt Thread turns: 0'), findsOneWidget);
+    expect(find.text('Prompt Thread'), findsOneWidget);
+    expect(find.text('No turns yet'), findsOneWidget);
 
     controller.emit(
       DesktopSessionControllerState.data(
@@ -234,7 +232,6 @@ void main() {
     await tester.pump();
 
     expect(find.text('Status: completed'), findsOneWidget);
-    expect(find.text('Active Turn: none'), findsOneWidget);
     expect(find.widgetWithText(TextField, 'Next Turn'), findsOneWidget);
   });
 
@@ -262,10 +259,66 @@ void main() {
       expect(find.text('Failed to load session.'), findsNothing);
       expect(find.text('Status: failed'), findsOneWidget);
       expect(find.text('Failure: Simulated host failure.'), findsOneWidget);
-      expect(find.text('Active Turn: none'), findsOneWidget);
       expect(find.widgetWithText(TextField, 'Next Turn'), findsOneWidget);
     },
   );
+
+  testWidgets(
+    'empty prompt thread renders placeholder and keeps authoring available',
+    (WidgetTester tester) async {
+      final controller = _FakeDesktopSessionController(
+        onInitialize: (controller) {
+          controller.emit(DesktopSessionControllerState.data(_buildSnapshot()));
+        },
+      );
+
+      await tester.pumpWidget(
+        CommonCodeDesktopApp(sessionController: controller),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.text('No turns yet'), findsOneWidget);
+      expect(
+        find.text('Submit the next turn to start this Prompt Thread.'),
+        findsOneWidget,
+      );
+      expect(find.widgetWithText(TextField, 'Next Turn'), findsOneWidget);
+      expect(find.text('Submit Turn'), findsOneWidget);
+    },
+  );
+
+  testWidgets('previously submitted turns render in prompt thread order', (
+    WidgetTester tester,
+  ) async {
+    final controller = _FakeDesktopSessionController(
+      onInitialize: (controller) {
+        controller.emit(
+          DesktopSessionControllerState.data(
+            _buildSnapshot(session: _buildOrderedConversationSession()),
+          ),
+        );
+      },
+    );
+
+    await tester.pumpWidget(
+      CommonCodeDesktopApp(sessionController: controller),
+    );
+    await tester.pumpAndSettle();
+
+    final firstTextFinder = find.text('First submitted turn');
+    final secondTextFinder = find.text('Second submitted turn');
+
+    expect(firstTextFinder, findsOneWidget);
+    expect(secondTextFinder, findsOneWidget);
+    expect(
+      tester.getTopLeft(firstTextFinder).dy <
+          tester.getTopLeft(secondTextFinder).dy,
+      isTrue,
+    );
+    expect(find.text('Status: completed'), findsOneWidget);
+    expect(find.text('Status: failed'), findsOneWidget);
+    expect(find.text('Failure: Ordered failure.'), findsOneWidget);
+  });
 }
 
 DesktopSessionSnapshot _buildSnapshot({Session? session}) {
@@ -308,6 +361,32 @@ Session _buildCompletedTurnSession() =>
 Session _buildFailedTurnSession() => _buildRunningTurnSession().failActiveTurn(
   failureSummary: 'Simulated host failure.',
 );
+
+Session _buildOrderedConversationSession() {
+  const desktopClient = Client(id: 'desktop-client');
+  const reviewerClient = Client(id: 'reviewer-client');
+
+  return Session(
+        id: 'desktop-session',
+        activeHost: const Host(id: 'desktop-host'),
+      )
+      .attachClient(desktopClient)
+      .attachClient(reviewerClient)
+      .startTurn(
+        turnId: 'turn-1',
+        client: desktopClient,
+        submittedText: 'First submitted turn',
+      )
+      .advanceActiveTurnToRunning()
+      .completeActiveTurn()
+      .startTurn(
+        turnId: 'turn-2',
+        client: reviewerClient,
+        submittedText: 'Second submitted turn',
+      )
+      .advanceActiveTurnToRunning()
+      .failActiveTurn(failureSummary: 'Ordered failure.');
+}
 
 typedef _ControllerCallback =
     FutureOr<void> Function(_FakeDesktopSessionController controller);

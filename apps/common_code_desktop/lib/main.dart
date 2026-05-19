@@ -1,3 +1,4 @@
+import 'package:common_code_domain/common_code_domain.dart';
 import 'package:flutter/material.dart';
 
 import 'src/desktop_session_controller.dart';
@@ -207,41 +208,22 @@ class _SessionDataView extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final session = snapshot.session;
-    final inputClientId = session.inputClient?.id ?? 'none';
-    final activeTurnId = session.activeTurn?.id ?? 'none';
     final hasActiveTurn = session.activeTurn != null;
-    final attachedClientIds = session.clients
-        .map((client) => client.id)
-        .join(', ');
+    final turns = session.promptThread.turns;
 
     return _SessionSection(
-      title: 'Live Session state',
+      title: 'Prompt Thread',
       children: [
-        Text('Session id: ${session.id}'),
-        const SizedBox(height: 8),
-        Text('Host id: ${session.activeHost.id}'),
-        const SizedBox(height: 8),
-        Text('Attached Client: ${snapshot.attachedClientId}'),
-        const SizedBox(height: 8),
-        Text('Attached Clients: $attachedClientIds'),
-        const SizedBox(height: 8),
-        Text('Input Client: $inputClientId'),
-        const SizedBox(height: 8),
-        Text('Prompt Thread turns: ${session.promptThread.turns.length}'),
-        const SizedBox(height: 8),
-        Text('Active Turn: $activeTurnId'),
-        if (session.promptThread.turns.isNotEmpty) ...[
-          const SizedBox(height: 16),
-          Text('Prompt Thread', style: Theme.of(context).textTheme.titleMedium),
-          const SizedBox(height: 8),
-          for (final turn in session.promptThread.turns) ...[
-            Text('Turn ${turn.id}: ${turn.submittedText}'),
-            Text('Status: ${turn.status.name}'),
-            if (turn.failureSummary case final failureSummary?)
-              Text('Failure: $failureSummary'),
-            const SizedBox(height: 8),
+        if (turns.isEmpty)
+          const _PromptThreadEmptyState()
+        else
+          for (var index = 0; index < turns.length; index++) ...[
+            _PromptThreadTurnCard(
+              turn: turns[index],
+              attachedClientId: snapshot.attachedClientId,
+            ),
+            if (index < turns.length - 1) const SizedBox(height: 12),
           ],
-        ],
         const SizedBox(height: 16),
         if (!hasActiveTurn) ...[
           TextField(
@@ -263,7 +245,7 @@ class _SessionDataView extends StatelessWidget {
           ),
         ] else ...[
           const Text(
-            'Turn authoring is unavailable while the current active Turn remains in progress.',
+            'Next-turn authoring is unavailable while the current turn remains queued or running.',
           ),
         ],
         const SizedBox(height: 16),
@@ -274,6 +256,79 @@ class _SessionDataView extends StatelessWidget {
           child: const Text('Refresh Session'),
         ),
       ],
+    );
+  }
+}
+
+class _PromptThreadEmptyState extends StatelessWidget {
+  const _PromptThreadEmptyState();
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        border: Border.all(color: Theme.of(context).colorScheme.outlineVariant),
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: const Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text('No turns yet'),
+          SizedBox(height: 8),
+          Text('Submit the next turn to start this Prompt Thread.'),
+        ],
+      ),
+    );
+  }
+}
+
+class _PromptThreadTurnCard extends StatelessWidget {
+  const _PromptThreadTurnCard({
+    required this.turn,
+    required this.attachedClientId,
+  });
+
+  final Turn turn;
+  final String attachedClientId;
+
+  @override
+  Widget build(BuildContext context) {
+    final isAttachedClientTurn = turn.clientId == attachedClientId;
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: isAttachedClientTurn
+            ? Theme.of(context).colorScheme.surfaceContainerHighest
+            : Theme.of(context).colorScheme.surface,
+        border: Border.all(color: Theme.of(context).colorScheme.outlineVariant),
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            isAttachedClientTurn
+                ? 'This desktop client'
+                : 'Client ${turn.clientId}',
+            style: Theme.of(context).textTheme.labelLarge,
+          ),
+          const SizedBox(height: 8),
+          Text(
+            turn.submittedText,
+            style: Theme.of(context).textTheme.titleMedium,
+          ),
+          const SizedBox(height: 8),
+          Text('Status: ${turn.status.name}'),
+          if (turn.failureSummary case final String failureSummary) ...[
+            const SizedBox(height: 8),
+            Text('Failure: $failureSummary'),
+          ],
+        ],
+      ),
     );
   }
 }
