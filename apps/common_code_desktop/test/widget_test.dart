@@ -234,7 +234,9 @@ void main() {
 
     controller.emit(
       DesktopSessionControllerState.data(
-        _buildSnapshot(session: _buildRunningTurnSession()),
+        _buildSnapshot(
+          session: _buildRunningTurnSessionWithNotification(),
+        ),
       ),
     );
     await tester.pump();
@@ -245,7 +247,9 @@ void main() {
 
     controller.emit(
       DesktopSessionControllerState.data(
-        _buildSnapshot(session: _buildCompletedTurnSession()),
+        _buildSnapshot(
+          session: _buildCompletedTurnSessionWithNotification(),
+        ),
       ),
     );
     await tester.pump();
@@ -273,7 +277,9 @@ void main() {
 
       controller.emit(
         DesktopSessionControllerState.data(
-          _buildSnapshot(session: _buildRunningTurnSession()),
+          _buildSnapshot(
+            session: _buildRunningTurnSessionWithNotification(),
+          ),
         ),
       );
       await tester.pump();
@@ -281,7 +287,9 @@ void main() {
 
       controller.emit(
         DesktopSessionControllerState.data(
-          _buildSnapshot(session: _buildFailedTurnSession()),
+          _buildSnapshot(
+            session: _buildFailedTurnSessionWithNotification(),
+          ),
         ),
       );
       await tester.pump();
@@ -300,13 +308,15 @@ void main() {
   );
 
   testWidgets(
-    'initial running snapshot renders existing notification once and replay does not duplicate it',
+    'first render shows still-unacknowledged running notification already in session state',
     (WidgetTester tester) async {
       final controller = _FakeDesktopSessionController(
         onInitialize: (controller) {
           controller.emit(
             DesktopSessionControllerState.data(
-              _buildSnapshot(session: _buildRunningTurnSession()),
+              _buildSnapshot(
+                session: _buildRunningTurnSessionWithNotification(),
+              ),
             ),
           );
         },
@@ -319,35 +329,158 @@ void main() {
 
       expect(find.text('Lifecycle: active (running)'), findsOneWidget);
       expect(find.text('Turn running: Stored submitted turn'), findsOneWidget);
+    },
+  );
+
+  testWidgets(
+    'first render suppresses an already acknowledged notification',
+    (WidgetTester tester) async {
+      final controller = _FakeDesktopSessionController(
+        onInitialize: (controller) {
+          controller.emit(
+            DesktopSessionControllerState.data(
+              _buildSnapshot(
+                session: _buildRunningTurnSessionWithNotification(
+                  isAcknowledged: true,
+                ),
+              ),
+            ),
+          );
+        },
+      );
+
+      await tester.pumpWidget(
+        CommonCodeDesktopApp(sessionController: controller),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.text('Lifecycle: active (running)'), findsOneWidget);
+      expect(find.text('Turn running: Stored submitted turn'), findsNothing);
+    },
+  );
+
+  testWidgets(
+    'repeated delivery of the same notification id does not duplicate visible renders in one runtime',
+    (WidgetTester tester) async {
+      final controller = _FakeDesktopSessionController(
+        onInitialize: (controller) {
+          controller.emit(
+            DesktopSessionControllerState.data(
+              _buildSnapshot(
+                session: _buildRunningTurnSessionWithNotification(),
+              ),
+            ),
+          );
+        },
+      );
+
+      await tester.pumpWidget(
+        CommonCodeDesktopApp(sessionController: controller),
+      );
+      await tester.pumpAndSettle();
 
       controller.emit(
         DesktopSessionControllerState.data(
-          _buildSnapshot(session: _buildRunningTurnSession()),
+          _buildSnapshot(session: _buildRunningTurnSessionWithNotification()),
         ),
       );
       await tester.pumpAndSettle();
 
       expect(find.text('Turn running: Stored submitted turn'), findsOneWidget);
+    },
+  );
 
-      controller.emit(
-        DesktopSessionControllerState.data(
-          _buildSnapshot(session: _buildCompletedTurnSession()),
-        ),
+  testWidgets(
+    'still-unacknowledged notifications replay after reconnect in the same runtime',
+    (WidgetTester tester) async {
+      final controller = _FakeDesktopSessionController(
+        onInitialize: (controller) {
+          controller.emit(
+            DesktopSessionControllerState.data(
+              _buildSnapshot(
+                session: _buildRunningTurnSessionWithNotification(),
+              ),
+            ),
+          );
+        },
       );
-      await tester.pump();
-      await tester.pump(const Duration(seconds: 4));
+
+      await tester.pumpWidget(
+        CommonCodeDesktopApp(sessionController: controller),
+      );
       await tester.pumpAndSettle();
 
-      expect(find.text('Outcome: completed'), findsOneWidget);
-      expect(
-        find.text('Turn completed: Stored submitted turn'),
-        findsOneWidget,
-      );
+      controller.emit(const DesktopSessionControllerState.loading());
+      await tester.pump();
 
       controller.emit(
         DesktopSessionControllerState.data(
-          _buildSnapshot(session: _buildCompletedTurnSession()),
+          _buildSnapshot(session: _buildRunningTurnSessionWithNotification()),
         ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.text('Turn running: Stored submitted turn'), findsOneWidget);
+    },
+  );
+
+  testWidgets(
+    'already acknowledged notifications do not replay after reconnect in the same runtime',
+    (WidgetTester tester) async {
+      final controller = _FakeDesktopSessionController(
+        onInitialize: (controller) {
+          controller.emit(
+            DesktopSessionControllerState.data(
+              _buildSnapshot(
+                session: _buildRunningTurnSessionWithNotification(
+                  isAcknowledged: true,
+                ),
+              ),
+            ),
+          );
+        },
+      );
+
+      await tester.pumpWidget(
+        CommonCodeDesktopApp(sessionController: controller),
+      );
+      await tester.pumpAndSettle();
+
+      controller.emit(const DesktopSessionControllerState.loading());
+      await tester.pump();
+
+      controller.emit(
+        DesktopSessionControllerState.data(
+          _buildSnapshot(
+            session: _buildRunningTurnSessionWithNotification(
+              isAcknowledged: true,
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.text('Turn running: Stored submitted turn'), findsNothing);
+    },
+  );
+
+  testWidgets(
+    'completed outcome notification renders from session-backed notification data',
+    (WidgetTester tester) async {
+      final controller = _FakeDesktopSessionController(
+        onInitialize: (controller) {
+          controller.emit(
+            DesktopSessionControllerState.data(
+              _buildSnapshot(
+                session: _buildCompletedTurnSessionWithNotification(),
+              ),
+            ),
+          );
+        },
+      );
+
+      await tester.pumpWidget(
+        CommonCodeDesktopApp(sessionController: controller),
       );
       await tester.pumpAndSettle();
 
@@ -359,13 +492,15 @@ void main() {
   );
 
   testWidgets(
-    'initial completed snapshot renders existing notifications without local diff state',
+    'failed outcome notification renders from session-backed notification data',
     (WidgetTester tester) async {
       final controller = _FakeDesktopSessionController(
         onInitialize: (controller) {
           controller.emit(
             DesktopSessionControllerState.data(
-              _buildSnapshot(session: _buildCompletedTurnSession()),
+              _buildSnapshot(
+                session: _buildFailedTurnSessionWithNotification(),
+              ),
             ),
           );
         },
@@ -376,13 +511,7 @@ void main() {
       );
       await tester.pumpAndSettle();
 
-      expect(find.text('Turn running: Stored submitted turn'), findsOneWidget);
-      await tester.pump(const Duration(seconds: 4));
-      await tester.pumpAndSettle();
-      expect(
-        find.text('Turn completed: Stored submitted turn'),
-        findsOneWidget,
-      );
+      expect(find.text('Turn failed: Stored submitted turn'), findsOneWidget);
     },
   );
 
@@ -605,15 +734,81 @@ Session _buildCrossClientReadOnlySession() {
 
 Session _buildQueuedTurnSession() => _buildActiveTurnSession();
 
-Session _buildRunningTurnSession() =>
-    _buildActiveTurnSession().advanceActiveTurnToRunning();
+Session _buildRunningTurnSessionWithNotification({bool isAcknowledged = false}) {
+  return _buildSessionWithNotifications(
+    turns: const [
+      Turn.running(
+        id: 'turn-1',
+        clientId: 'desktop-client',
+        submittedText: 'Stored submitted turn',
+      ),
+    ],
+    notifications: [
+      SessionNotification.forTransition(
+        sessionId: 'desktop-session',
+        turnId: 'turn-1',
+        transition: SessionNotificationTransition.queuedToRunning,
+        isAcknowledged: isAcknowledged,
+      ),
+    ],
+  );
+}
 
-Session _buildCompletedTurnSession() =>
-    _buildRunningTurnSession().completeActiveTurn();
+Session _buildCompletedTurnSessionWithNotification({
+  bool isAcknowledged = false,
+}) {
+  return _buildSessionWithNotifications(
+    turns: const [
+      Turn.completed(
+        id: 'turn-1',
+        clientId: 'desktop-client',
+        submittedText: 'Stored submitted turn',
+      ),
+    ],
+    notifications: [
+      SessionNotification.forTransition(
+        sessionId: 'desktop-session',
+        turnId: 'turn-1',
+        transition: SessionNotificationTransition.runningToCompleted,
+        isAcknowledged: isAcknowledged,
+      ),
+    ],
+  );
+}
 
-Session _buildFailedTurnSession() => _buildRunningTurnSession().failActiveTurn(
-  failureSummary: 'Simulated host failure.',
-);
+Session _buildFailedTurnSessionWithNotification({bool isAcknowledged = false}) {
+  return _buildSessionWithNotifications(
+    turns: const [
+      Turn.failed(
+        id: 'turn-1',
+        clientId: 'desktop-client',
+        submittedText: 'Stored submitted turn',
+        failureSummary: 'Simulated host failure.',
+      ),
+    ],
+    notifications: [
+      SessionNotification.forTransition(
+        sessionId: 'desktop-session',
+        turnId: 'turn-1',
+        transition: SessionNotificationTransition.runningToFailed,
+        isAcknowledged: isAcknowledged,
+      ),
+    ],
+  );
+}
+
+Session _buildSessionWithNotifications({
+  required List<Turn> turns,
+  required List<SessionNotification> notifications,
+}) {
+  return Session(
+    id: 'desktop-session',
+    activeHost: const Host(id: 'desktop-host'),
+    clients: const [Client(id: 'desktop-client')],
+    promptThread: PromptThread(turns: turns),
+    notifications: notifications,
+  );
+}
 
 Session _buildOrderedConversationSession() {
   const desktopClient = Client(id: 'desktop-client');
