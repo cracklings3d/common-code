@@ -46,11 +46,68 @@ class SessionScreen extends StatefulWidget {
 
 class _SessionScreenState extends State<SessionScreen> {
   final TextEditingController _draftController = TextEditingController();
+  DesktopSessionSnapshot? _lastObservedSnapshot;
+  final Set<String> _emittedTurnNoticeKeys = <String>{};
 
   @override
   void initState() {
     super.initState();
+    widget.sessionController.addListener(_handleSessionControllerUpdate);
     widget.sessionController.initialize();
+  }
+
+  @override
+  void didUpdateWidget(covariant SessionScreen oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.sessionController == widget.sessionController) {
+      return;
+    }
+
+    oldWidget.sessionController.removeListener(_handleSessionControllerUpdate);
+    _lastObservedSnapshot = null;
+    _emittedTurnNoticeKeys.clear();
+    widget.sessionController.addListener(_handleSessionControllerUpdate);
+  }
+
+  void _handleSessionControllerUpdate() {
+    final state = widget.sessionController.state;
+    if (state.status != DesktopSessionControllerStatus.data) {
+      return;
+    }
+
+    final snapshot = state.snapshot!;
+    final previousSnapshot = _lastObservedSnapshot;
+    _lastObservedSnapshot = snapshot;
+
+    if (previousSnapshot == null) {
+      return;
+    }
+
+    final notices = _deriveTurnTransitionNotices(
+      previousSnapshot: previousSnapshot,
+      currentSnapshot: snapshot,
+      emittedNoticeKeys: _emittedTurnNoticeKeys,
+    );
+
+    if (notices.isEmpty) {
+      return;
+    }
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) {
+        return;
+      }
+
+      final messenger = ScaffoldMessenger.maybeOf(context);
+      if (messenger == null) {
+        return;
+      }
+
+      for (final notice in notices) {
+        messenger.hideCurrentSnackBar();
+        messenger.showSnackBar(SnackBar(content: Text(notice.message)));
+      }
+    });
   }
 
   Future<void> _refreshSession() {
@@ -78,6 +135,7 @@ class _SessionScreenState extends State<SessionScreen> {
 
   @override
   void dispose() {
+    widget.sessionController.removeListener(_handleSessionControllerUpdate);
     if (widget.disposeSessionController) {
       widget.sessionController.dispose();
     }
@@ -127,6 +185,66 @@ class _SessionScreenState extends State<SessionScreen> {
       ),
     );
   }
+}
+
+List<_TurnTransitionNotice> _deriveTurnTransitionNotices({
+  required DesktopSessionSnapshot previousSnapshot,
+  required DesktopSessionSnapshot currentSnapshot,
+  required Set<String> emittedNoticeKeys,
+}) {
+  final previousTurns = {
+    for (final turn in previousSnapshot.session.promptThread.turns)
+      turn.id: turn,
+  };
+  final notices = <_TurnTransitionNotice>[];
+
+  for (final turn in currentSnapshot.session.promptThread.turns) {
+    final previousTurn = previousTurns[turn.id];
+    if (previousTurn == null || previousTurn.status == turn.status) {
+      continue;
+    }
+
+    final notice = _TurnTransitionNotice.fromTransition(
+      previousTurn: previousTurn,
+      currentTurn: turn,
+    );
+    if (notice == null) {
+      continue;
+    }
+
+    final noticeKey = '${turn.id}:${turn.status.name}';
+    if (!emittedNoticeKeys.add(noticeKey)) {
+      continue;
+    }
+
+    notices.add(notice);
+  }
+
+  return notices;
+}
+
+final class _TurnTransitionNotice {
+  const _TurnTransitionNotice._({required this.message});
+
+  static _TurnTransitionNotice? fromTransition({
+    required Turn previousTurn,
+    required Turn currentTurn,
+  }) {
+    return switch ((previousTurn.status, currentTurn.status)) {
+      (TurnStatus.queued, TurnStatus.running) => _TurnTransitionNotice._(
+        message: 'Turn running: ${currentTurn.submittedText}',
+      ),
+      (TurnStatus.running, TurnStatus.completed) => _TurnTransitionNotice._(
+        message: 'Turn completed: ${currentTurn.submittedText}',
+      ),
+      (TurnStatus.running, TurnStatus.failed) => _TurnTransitionNotice._(
+        message: 'Turn failed: ${currentTurn.submittedText}',
+      ),
+      _ => null,
+    };
+  }
+
+  final String message;
 }
 
 class _SessionLoadingView extends StatelessWidget {
