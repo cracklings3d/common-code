@@ -1,20 +1,18 @@
-import 'dart:async';
-
-import 'package:common_code_domain/common_code_domain.dart';
 import 'package:flutter/material.dart';
-import 'package:host_core/host_core.dart';
 
-import 'src/desktop_session_snapshot_store.dart';
+import 'src/desktop_session_controller.dart';
 
 void main() {
   runApp(CommonCodeDesktopApp());
 }
 
 class CommonCodeDesktopApp extends StatelessWidget {
-  CommonCodeDesktopApp({super.key, DesktopSessionLoader? sessionLoader})
-    : sessionLoader = sessionLoader ?? DesktopHostSessionLoader();
+  CommonCodeDesktopApp({super.key, DesktopSessionController? sessionController})
+    : sessionController = sessionController ?? DesktopSessionController(),
+      _ownsSessionController = sessionController == null;
 
-  final DesktopSessionLoader sessionLoader;
+  final DesktopSessionController sessionController;
+  final bool _ownsSessionController;
 
   @override
   Widget build(BuildContext context) {
@@ -23,239 +21,65 @@ class CommonCodeDesktopApp extends StatelessWidget {
       theme: ThemeData(
         colorScheme: ColorScheme.fromSeed(seedColor: Colors.indigo),
       ),
-      home: SessionScreen(sessionLoader: sessionLoader),
-    );
-  }
-}
-
-abstract interface class DesktopSessionLoader {
-  Future<DesktopSessionSnapshot?> load();
-
-  Stream<DesktopSessionSnapshot?> watch();
-
-  Future<DesktopSessionSnapshot> submitTurn({required String submittedText});
-}
-
-final class DesktopSessionSnapshot {
-  const DesktopSessionSnapshot({
-    required this.session,
-    required this.attachedClientId,
-  });
-
-  final Session session;
-  final String attachedClientId;
-}
-
-final class DesktopHostSessionLoader implements DesktopSessionLoader {
-  DesktopHostSessionLoader({
-    HostService? hostService,
-    DesktopSessionSnapshotStore? snapshotStore,
-  }) : _hostService = hostService,
-       _snapshotStore =
-           snapshotStore ?? SharedPreferencesDesktopSessionSnapshotStore();
-
-  final HostService? _hostService;
-  final DesktopSessionSnapshotStore _snapshotStore;
-
-  static const _defaultSessionId = 'desktop-session';
-  static const _hostId = 'desktop-host';
-  static const _attachedClientId = 'desktop-client';
-
-  HostService? _service;
-  bool _isBootstrapped = false;
-  String? _currentSessionId;
-
-  Future<void> _bootstrapIfNeeded() async {
-    final service = _service ??= _hostService ?? createInMemoryHostService();
-
-    if (_isBootstrapped) {
-      return;
-    }
-
-    final restoredSession = await _snapshotStore.readLatestSession(
-      desktopClientId: _attachedClientId,
-    );
-    if (restoredSession != null) {
-      try {
-        service.restoreSession(restoredSession);
-        _currentSessionId = restoredSession.id;
-        _isBootstrapped = true;
-        return;
-      } catch (_) {
-        // Fall back to the existing fresh desktop bootstrap path.
-      }
-    }
-
-    service.createSession(
-      sessionId: _defaultSessionId,
-      activeHost: const Host(id: _hostId),
-    );
-    service.attachClient(
-      sessionId: _defaultSessionId,
-      client: const Client(id: _attachedClientId),
-    );
-    _currentSessionId = _defaultSessionId;
-    _isBootstrapped = true;
-  }
-
-  @override
-  Future<DesktopSessionSnapshot?> load() async {
-    final service = _service ??= _hostService ?? createInMemoryHostService();
-    await _bootstrapIfNeeded();
-    final sessionId = _currentSessionId!;
-
-    return DesktopSessionSnapshot(
-      session: service.readSession(sessionId),
-      attachedClientId: _attachedClientId,
-    );
-  }
-
-  @override
-  Stream<DesktopSessionSnapshot?> watch() async* {
-    final service = _service ??= _hostService ?? createInMemoryHostService();
-    await _bootstrapIfNeeded();
-    final sessionId = _currentSessionId!;
-
-    await for (final session in service.watchSession(sessionId)) {
-      try {
-        await _snapshotStore.writeLatestSession(session);
-      } catch (_) {
-        // Persisting the mirror snapshot must not break the live host-backed UI.
-      }
-
-      yield DesktopSessionSnapshot(
-        session: session,
-        attachedClientId: _attachedClientId,
-      );
-    }
-  }
-
-  @override
-  Future<DesktopSessionSnapshot> submitTurn({
-    required String submittedText,
-  }) async {
-    final service = _service ??= _hostService ?? createInMemoryHostService();
-
-    await _bootstrapIfNeeded();
-    final sessionId = _currentSessionId!;
-
-    final session = service.submitTurn(
-      sessionId: sessionId,
-      client: const Client(id: _attachedClientId),
-      submittedText: submittedText,
-    );
-
-    return DesktopSessionSnapshot(
-      session: session,
-      attachedClientId: _attachedClientId,
+      home: SessionScreen(
+        sessionController: sessionController,
+        disposeSessionController: _ownsSessionController,
+      ),
     );
   }
 }
 
 class SessionScreen extends StatefulWidget {
-  const SessionScreen({super.key, required this.sessionLoader});
+  const SessionScreen({
+    super.key,
+    required this.sessionController,
+    required this.disposeSessionController,
+  });
 
-  final DesktopSessionLoader sessionLoader;
+  final DesktopSessionController sessionController;
+  final bool disposeSessionController;
 
   @override
   State<SessionScreen> createState() => _SessionScreenState();
 }
 
 class _SessionScreenState extends State<SessionScreen> {
-  SessionScreenState _state = const SessionScreenLoading();
   final TextEditingController _draftController = TextEditingController();
-  bool _isSubmitting = false;
-  StreamSubscription<DesktopSessionSnapshot?>? _watchSubscription;
 
   @override
   void initState() {
     super.initState();
-    _startSessionWatch();
+    widget.sessionController.initialize();
   }
 
-  Future<void> _startSessionWatch() async {
-    await _watchSubscription?.cancel();
-
-    if (!mounted) {
-      return;
-    }
-
-    setState(() {
-      _state = const SessionScreenLoading();
-    });
-
+  Future<void> _refreshSession() {
     try {
-      final stream = widget.sessionLoader.watch();
-      _watchSubscription = stream.listen(
-        (snapshot) {
-          if (!mounted) {
-            return;
-          }
-
-          setState(() {
-            _state = switch (snapshot) {
-              null => const SessionScreenEmpty(),
-              final snapshot => SessionScreenData(snapshot),
-            };
-          });
-        },
-        onError: (Object error, StackTrace stackTrace) {
-          if (!mounted) {
-            return;
-          }
-
-          setState(() {
-            _state = SessionScreenError(error.toString());
-          });
-        },
-      );
-    } catch (error) {
-      if (!mounted) {
-        return;
-      }
-
-      setState(() {
-        _state = SessionScreenError(error.toString());
-      });
+      return widget.sessionController.refresh();
+    } catch (_) {
+      return Future<void>.value();
     }
   }
 
   Future<void> _submitTurn() async {
     final draftText = _draftController.text;
 
-    setState(() {
-      _isSubmitting = true;
-    });
-
     try {
-      await widget.sessionLoader.submitTurn(submittedText: draftText);
+      await widget.sessionController.submitTurn(submittedText: draftText);
       if (!mounted) {
         return;
       }
 
-      setState(() {
-        _draftController.clear();
-      });
-    } catch (error) {
-      if (!mounted) {
-        return;
-      }
-
-      setState(() {
-        _state = SessionScreenError(error.toString());
-      });
-    } finally {
-      if (mounted) {
-        setState(() {
-          _isSubmitting = false;
-        });
-      }
+      _draftController.clear();
+    } catch (_) {
+      // The controller already exposes a renderable error state.
     }
   }
 
   @override
   void dispose() {
-    _watchSubscription?.cancel();
+    if (widget.disposeSessionController) {
+      widget.sessionController.dispose();
+    }
     _draftController.dispose();
     super.dispose();
   }
@@ -267,57 +91,41 @@ class _SessionScreenState extends State<SessionScreen> {
         backgroundColor: Theme.of(context).colorScheme.inversePrimary,
         title: const Text('CommonCode Desktop'),
       ),
-      body: Center(
-        child: SingleChildScrollView(
-          padding: const EdgeInsets.all(24),
-          child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 480),
-            child: switch (_state) {
-              SessionScreenLoading() => const _SessionLoadingView(),
-              SessionScreenEmpty() => _SessionEmptyView(
-                onRefresh: _startSessionWatch,
+      body: AnimatedBuilder(
+        animation: widget.sessionController,
+        builder: (context, child) {
+          final state = widget.sessionController.state;
+
+          return Center(
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.all(24),
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 480),
+                child: switch (state.status) {
+                  DesktopSessionControllerStatus.loading =>
+                    const _SessionLoadingView(),
+                  DesktopSessionControllerStatus.empty => _SessionEmptyView(
+                    onRefresh: _refreshSession,
+                  ),
+                  DesktopSessionControllerStatus.error => _SessionErrorView(
+                    message: state.message!,
+                    onRetry: _refreshSession,
+                  ),
+                  DesktopSessionControllerStatus.data => _SessionDataView(
+                    snapshot: state.snapshot!,
+                    draftController: _draftController,
+                    onRefresh: _refreshSession,
+                    onSubmitTurn: _submitTurn,
+                    isSubmitting: state.isSubmitting,
+                  ),
+                },
               ),
-              SessionScreenError(:final message) => _SessionErrorView(
-                message: message,
-                onRetry: _startSessionWatch,
-              ),
-              SessionScreenData(:final snapshot) => _SessionDataView(
-                snapshot: snapshot,
-                draftController: _draftController,
-                onRefresh: _startSessionWatch,
-                onSubmitTurn: _submitTurn,
-                isSubmitting: _isSubmitting,
-              ),
-            },
-          ),
-        ),
+            ),
+          );
+        },
       ),
     );
   }
-}
-
-sealed class SessionScreenState {
-  const SessionScreenState();
-}
-
-final class SessionScreenLoading extends SessionScreenState {
-  const SessionScreenLoading();
-}
-
-final class SessionScreenEmpty extends SessionScreenState {
-  const SessionScreenEmpty();
-}
-
-final class SessionScreenError extends SessionScreenState {
-  const SessionScreenError(this.message);
-
-  final String message;
-}
-
-final class SessionScreenData extends SessionScreenState {
-  const SessionScreenData(this.snapshot);
-
-  final DesktopSessionSnapshot snapshot;
 }
 
 class _SessionLoadingView extends StatelessWidget {

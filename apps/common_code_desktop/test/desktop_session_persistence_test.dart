@@ -1,6 +1,7 @@
+import 'dart:async';
 import 'dart:convert';
 
-import 'package:common_code_desktop/main.dart';
+import 'package:common_code_desktop/src/desktop_session_controller.dart';
 import 'package:common_code_desktop/src/desktop_session_snapshot_codec.dart';
 import 'package:common_code_desktop/src/desktop_session_snapshot_store.dart';
 import 'package:common_code_domain/common_code_domain.dart';
@@ -14,28 +15,34 @@ void main() {
   group('DesktopSessionSnapshotJsonCodec', () {
     const codec = DesktopSessionSnapshotJsonCodec();
 
-    test('round-trips valid session data without storing input client field', () {
-      final encoded = codec.encode(_runningRestoredSession());
-      final decoded = codec.decode(encoded, desktopClientId: 'desktop-client');
+    test(
+      'round-trips valid session data without storing input client field',
+      () {
+        final encoded = codec.encode(_runningRestoredSession());
+        final decoded = codec.decode(
+          encoded,
+          desktopClientId: 'desktop-client',
+        );
 
-      expect(encoded.containsKey('inputClient'), isFalse);
-      expect(decoded.id, 'restored-session');
-      expect(decoded.activeHost.id, 'restored-host');
-      expect(
-        decoded.clients.map((client) => client.id).toList(),
-        ['desktop-client', 'reviewer-client'],
-      );
-      expect(
-        decoded.promptThread.turns.map((turn) => turn.submittedText).toList(),
-        ['First submitted turn', 'Second submitted turn'],
-      );
-      expect(
-        decoded.promptThread.turns.map((turn) => turn.status).toList(),
-        [TurnStatus.completed, TurnStatus.running],
-      );
-      expect(decoded.activeTurn?.id, 'turn-2');
-      expect(decoded.inputClient?.id, 'reviewer-client');
-    });
+        expect(encoded.containsKey('inputClient'), isFalse);
+        expect(decoded.id, 'restored-session');
+        expect(decoded.activeHost.id, 'restored-host');
+        expect(decoded.clients.map((client) => client.id).toList(), [
+          'desktop-client',
+          'reviewer-client',
+        ]);
+        expect(
+          decoded.promptThread.turns.map((turn) => turn.submittedText).toList(),
+          ['First submitted turn', 'Second submitted turn'],
+        );
+        expect(decoded.promptThread.turns.map((turn) => turn.status).toList(), [
+          TurnStatus.completed,
+          TurnStatus.running,
+        ]);
+        expect(decoded.activeTurn?.id, 'turn-2');
+        expect(decoded.inputClient?.id, 'reviewer-client');
+      },
+    );
 
     test('preserves failure summary for failed turns', () {
       final decoded = codec.decode(
@@ -45,7 +52,10 @@ void main() {
 
       expect(decoded.activeTurn, isNull);
       expect(decoded.inputClient, isNull);
-      expect(decoded.promptThread.turns.single.failureSummary, 'Restored failure.');
+      expect(
+        decoded.promptThread.turns.single.failureSummary,
+        'Restored failure.',
+      );
     });
 
     test('rejects unknown schema versions', () {
@@ -90,13 +100,15 @@ void main() {
 
     test('returns null when stored JSON is semantically invalid', () async {
       SharedPreferences.setMockInitialValues(<String, Object>{
-        SharedPreferencesDesktopSessionSnapshotStore.storageKey: jsonEncode(<String, Object?>{
-          'schemaVersion': 1,
-          'sessionId': 'restored-session',
-          'activeHostId': 'restored-host',
-          'clientIds': <String>['reviewer-client'],
-          'turns': <Object?>[],
-        }),
+        SharedPreferencesDesktopSessionSnapshotStore.storageKey: jsonEncode(
+          <String, Object?>{
+            'schemaVersion': 1,
+            'sessionId': 'restored-session',
+            'activeHostId': 'restored-host',
+            'clientIds': <String>['reviewer-client'],
+            'turns': <Object?>[],
+          },
+        ),
       });
       final store = SharedPreferencesDesktopSessionSnapshotStore();
 
@@ -121,139 +133,207 @@ void main() {
     });
   });
 
-  group('DesktopHostSessionLoader', () {
-    test('falls back to fresh bootstrap when no stored snapshot exists', () async {
-      final loader = DesktopHostSessionLoader(
-        hostService: createInMemoryHostService(),
-        snapshotStore: _FakeSnapshotStore(),
-      );
+  group('DesktopSessionController persistence behavior', () {
+    test(
+      'falls back to fresh bootstrap when no stored snapshot exists',
+      () async {
+        final controller = DesktopSessionController(
+          hostService: createInMemoryHostService(),
+          snapshotStore: _FakeSnapshotStore(),
+        );
 
-      final snapshot = await loader.watch().first;
+        await controller.initialize();
 
-      expect(snapshot, isNotNull);
-      expect(snapshot!.session.id, 'desktop-session');
-      expect(snapshot.session.activeHost.id, 'desktop-host');
-      expect(snapshot.session.clients.map((client) => client.id), ['desktop-client']);
-      expect(snapshot.session.activeTurn, isNull);
-    });
+        expect(controller.state.status, DesktopSessionControllerStatus.data);
+        expect(controller.state.snapshot, isNotNull);
+        expect(controller.state.snapshot!.session.id, 'desktop-session');
+        expect(
+          controller.state.snapshot!.session.activeHost.id,
+          'desktop-host',
+        );
+        expect(
+          controller.state.snapshot!.session.clients.map((client) => client.id),
+          ['desktop-client'],
+        );
+        expect(controller.state.snapshot!.session.activeTurn, isNull);
+      },
+    );
 
-    test('falls back to fresh bootstrap when stored snapshot is invalid', () async {
-      final loader = DesktopHostSessionLoader(
-        hostService: createInMemoryHostService(),
-        snapshotStore: _FakeSnapshotStore(storedSession: null),
-      );
+    test(
+      'falls back to fresh bootstrap when stored snapshot is invalid',
+      () async {
+        final controller = DesktopSessionController(
+          hostService: createInMemoryHostService(),
+          snapshotStore: _FakeSnapshotStore(storedSession: null),
+        );
 
-      final snapshot = await loader.watch().first;
+        await controller.initialize();
 
-      expect(snapshot, isNotNull);
-      expect(snapshot!.session.id, 'desktop-session');
-    });
+        expect(controller.state.status, DesktopSessionControllerStatus.data);
+        expect(controller.state.snapshot!.session.id, 'desktop-session');
+      },
+    );
 
     test('restores a valid stored snapshot and preserves identities', () async {
-      final loader = DesktopHostSessionLoader(
+      final controller = DesktopSessionController(
         hostService: createInMemoryHostService(),
-        snapshotStore: _FakeSnapshotStore(storedSession: _runningRestoredSession()),
+        snapshotStore: _FakeSnapshotStore(
+          storedSession: _runningRestoredSession(),
+        ),
       );
 
-      final snapshot = await loader.watch().first;
+      await controller.initialize();
 
+      final snapshot = controller.state.snapshot;
       expect(snapshot, isNotNull);
       expect(snapshot!.session.id, 'restored-session');
       expect(snapshot.session.activeHost.id, 'restored-host');
+      expect(snapshot.session.clients.map((client) => client.id).toList(), [
+        'desktop-client',
+        'reviewer-client',
+      ]);
       expect(
-        snapshot.session.clients.map((client) => client.id).toList(),
-        ['desktop-client', 'reviewer-client'],
-      );
-      expect(
-        snapshot.session.promptThread.turns.map((turn) => turn.submittedText).toList(),
+        snapshot.session.promptThread.turns
+            .map((turn) => turn.submittedText)
+            .toList(),
         ['First submitted turn', 'Second submitted turn'],
       );
       expect(snapshot.session.activeTurn?.status, TurnStatus.running);
       expect(snapshot.session.inputClient?.id, 'reviewer-client');
     });
 
-    test('restored queued snapshot remains frozen as last-known state', () async {
-      final hostService = createInMemoryHostService(
-        simulationPolicy: const HostExecutionSimulationPolicy(
-          queuedToRunningDelay: Duration.zero,
-          runningToTerminalDelay: Duration.zero,
-        ),
-      );
-      final loader = DesktopHostSessionLoader(
-        hostService: hostService,
-        snapshotStore: _FakeSnapshotStore(storedSession: _queuedRestoredSession()),
-      );
+    test(
+      'restored queued snapshot remains frozen as last-known state',
+      () async {
+        final hostService = createInMemoryHostService(
+          simulationPolicy: const HostExecutionSimulationPolicy(
+            queuedToRunningDelay: Duration.zero,
+            runningToTerminalDelay: Duration.zero,
+          ),
+        );
+        final controller = DesktopSessionController(
+          hostService: hostService,
+          snapshotStore: _FakeSnapshotStore(
+            storedSession: _queuedRestoredSession(),
+          ),
+        );
 
-      final snapshot = await loader.watch().first;
+        await controller.initialize();
 
-      expect(snapshot, isNotNull);
-      expect(snapshot!.session.activeTurn?.status, TurnStatus.queued);
-      expect(snapshot.session.inputClient?.id, 'reviewer-client');
-      expect(
-        hostService.readSession('restored-session').activeTurn?.status,
-        TurnStatus.queued,
-      );
-    });
+        expect(controller.state.snapshot, isNotNull);
+        expect(
+          controller.state.snapshot!.session.activeTurn?.status,
+          TurnStatus.queued,
+        );
+        expect(
+          controller.state.snapshot!.session.inputClient?.id,
+          'reviewer-client',
+        );
+        expect(
+          hostService.readSession('restored-session').activeTurn?.status,
+          TurnStatus.queued,
+        );
+      },
+    );
 
-    test('restored running snapshot remains frozen as last-known state', () async {
-      final hostService = createInMemoryHostService(
-        simulationPolicy: const HostExecutionSimulationPolicy(
-          queuedToRunningDelay: Duration.zero,
-          runningToTerminalDelay: Duration.zero,
-        ),
-      );
-      final loader = DesktopHostSessionLoader(
-        hostService: hostService,
-        snapshotStore: _FakeSnapshotStore(storedSession: _runningRestoredSession()),
-      );
+    test(
+      'restored running snapshot remains frozen as last-known state',
+      () async {
+        final hostService = createInMemoryHostService(
+          simulationPolicy: const HostExecutionSimulationPolicy(
+            queuedToRunningDelay: Duration.zero,
+            runningToTerminalDelay: Duration.zero,
+          ),
+        );
+        final controller = DesktopSessionController(
+          hostService: hostService,
+          snapshotStore: _FakeSnapshotStore(
+            storedSession: _runningRestoredSession(),
+          ),
+        );
 
-      final snapshot = await loader.watch().first;
+        await controller.initialize();
 
-      expect(snapshot, isNotNull);
-      expect(snapshot!.session.activeTurn?.status, TurnStatus.running);
-      expect(snapshot.session.inputClient?.id, 'reviewer-client');
-      expect(
-        hostService.readSession('restored-session').activeTurn?.status,
-        TurnStatus.running,
-      );
-    });
+        expect(controller.state.snapshot, isNotNull);
+        expect(
+          controller.state.snapshot!.session.activeTurn?.status,
+          TurnStatus.running,
+        );
+        expect(
+          controller.state.snapshot!.session.inputClient?.id,
+          'reviewer-client',
+        );
+        expect(
+          hostService.readSession('restored-session').activeTurn?.status,
+          TurnStatus.running,
+        );
+      },
+    );
 
     test('restored completed snapshot keeps input client at none', () async {
-      final loader = DesktopHostSessionLoader(
+      final controller = DesktopSessionController(
         hostService: createInMemoryHostService(),
-        snapshotStore: _FakeSnapshotStore(storedSession: _completedRestoredSession()),
+        snapshotStore: _FakeSnapshotStore(
+          storedSession: _completedRestoredSession(),
+        ),
       );
 
-      final snapshot = await loader.watch().first;
+      await controller.initialize();
 
-      expect(snapshot!.session.activeTurn, isNull);
-      expect(snapshot.session.inputClient, isNull);
+      expect(controller.state.snapshot!.session.activeTurn, isNull);
+      expect(controller.state.snapshot!.session.inputClient, isNull);
     });
 
     test('restored failed snapshot keeps input client at none', () async {
-      final loader = DesktopHostSessionLoader(
+      final controller = DesktopSessionController(
         hostService: createInMemoryHostService(),
-        snapshotStore: _FakeSnapshotStore(storedSession: _failedRestoredSession()),
+        snapshotStore: _FakeSnapshotStore(
+          storedSession: _failedRestoredSession(),
+        ),
       );
 
-      final snapshot = await loader.watch().first;
+      await controller.initialize();
 
-      expect(snapshot!.session.activeTurn, isNull);
-      expect(snapshot.session.inputClient, isNull);
-      expect(snapshot.session.promptThread.turns.single.failureSummary, 'Restored failure.');
+      expect(controller.state.snapshot!.session.activeTurn, isNull);
+      expect(controller.state.snapshot!.session.inputClient, isNull);
+      expect(
+        controller
+            .state
+            .snapshot!
+            .session
+            .promptThread
+            .turns
+            .single
+            .failureSummary,
+        'Restored failure.',
+      );
     });
 
     test('watch writes each emitted snapshot back to storage', () async {
       final store = _FakeSnapshotStore();
-      final loader = DesktopHostSessionLoader(
+      final controller = DesktopSessionController(
         hostService: createInMemoryHostService(),
         snapshotStore: store,
       );
 
-      await loader.watch().first;
+      await controller.initialize();
+      await Future<void>.delayed(Duration.zero);
 
       expect(store.writtenSessions, isNotEmpty);
       expect(store.writtenSessions.single.id, 'desktop-session');
+    });
+
+    test('persistence write failures are non-fatal to live state', () async {
+      final controller = DesktopSessionController(
+        hostService: createInMemoryHostService(),
+        snapshotStore: _ThrowingSnapshotStore(),
+      );
+
+      await controller.initialize();
+      await Future<void>.delayed(Duration.zero);
+
+      expect(controller.state.status, DesktopSessionControllerStatus.data);
+      expect(controller.state.snapshot!.session.id, 'desktop-session');
     });
   });
 }
@@ -271,12 +351,11 @@ Session _baseRestoredSession() {
 Session _queuedRestoredSession() {
   const reviewerClient = Client(id: 'reviewer-client');
 
-  return _baseRestoredSession()
-      .startTurn(
-        turnId: 'turn-1',
-        client: reviewerClient,
-        submittedText: 'Queued submitted turn',
-      );
+  return _baseRestoredSession().startTurn(
+    turnId: 'turn-1',
+    client: reviewerClient,
+    submittedText: 'Queued submitted turn',
+  );
 }
 
 Session _runningRestoredSession() {
@@ -338,5 +417,17 @@ final class _FakeSnapshotStore implements DesktopSessionSnapshotStore {
   @override
   Future<void> writeLatestSession(Session session) async {
     writtenSessions.add(session);
+  }
+}
+
+final class _ThrowingSnapshotStore implements DesktopSessionSnapshotStore {
+  @override
+  Future<Session?> readLatestSession({required String desktopClientId}) async {
+    return null;
+  }
+
+  @override
+  Future<void> writeLatestSession(Session session) async {
+    throw StateError('persist failed');
   }
 }
