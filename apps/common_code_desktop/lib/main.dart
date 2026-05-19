@@ -209,6 +209,7 @@ class _SessionDataView extends StatelessWidget {
   Widget build(BuildContext context) {
     final session = snapshot.session;
     final turns = session.promptThread.turns;
+    final activeTurnId = session.activeTurn?.id;
     final authoringPresentation = _AuthoringPresentation.fromSnapshot(snapshot);
 
     return _SessionSection(
@@ -226,6 +227,7 @@ class _SessionDataView extends StatelessWidget {
             _PromptThreadTurnCard(
               turn: turns[index],
               attachedClientId: snapshot.attachedClientId,
+              isActiveTurn: turns[index].id == activeTurnId,
             ),
             if (index < turns.length - 1) const SizedBox(height: 12),
           ],
@@ -258,11 +260,11 @@ final class _AuthoringPresentation {
 
   factory _AuthoringPresentation.fromSnapshot(DesktopSessionSnapshot snapshot) {
     final session = snapshot.session;
-    final inputClientId = session.inputClient?.id;
-
-    if (inputClientId == null) {
+    if (session.activeTurn == null) {
       return const _AuthoringPresentation._(mode: _AuthoringMode.available);
     }
+
+    final inputClientId = session.inputClient?.id;
 
     if (inputClientId == snapshot.attachedClientId) {
       return _AuthoringPresentation._(
@@ -466,23 +468,38 @@ class _PromptThreadTurnCard extends StatelessWidget {
   const _PromptThreadTurnCard({
     required this.turn,
     required this.attachedClientId,
+    required this.isActiveTurn,
   });
 
   final Turn turn;
   final String attachedClientId;
+  final bool isActiveTurn;
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
     final isAttachedClientTurn = turn.clientId == attachedClientId;
+    final presentation = _TurnLifecyclePresentation.fromTurn(
+      turn,
+      isActiveTurn: isActiveTurn,
+    );
 
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: isAttachedClientTurn
-            ? Theme.of(context).colorScheme.surfaceContainerHighest
-            : Theme.of(context).colorScheme.surface,
-        border: Border.all(color: Theme.of(context).colorScheme.outlineVariant),
+        color: isActiveTurn
+            ? colorScheme.primaryContainer
+            : isAttachedClientTurn
+            ? colorScheme.surfaceContainerHighest
+            : colorScheme.surface,
+        border: Border.all(
+          color: isActiveTurn
+              ? colorScheme.primary
+              : colorScheme.outlineVariant,
+          width: isActiveTurn ? 1.5 : 1,
+        ),
         borderRadius: BorderRadius.circular(12),
       ),
       child: Column(
@@ -492,23 +509,42 @@ class _PromptThreadTurnCard extends StatelessWidget {
             isAttachedClientTurn
                 ? 'This desktop client'
                 : 'Client ${turn.clientId}',
-            style: Theme.of(context).textTheme.labelLarge,
+            style: theme.textTheme.labelLarge,
           ),
           const SizedBox(height: 8),
-          Text(
-            turn.submittedText,
-            style: Theme.of(context).textTheme.titleMedium,
-          ),
+          Text(turn.submittedText, style: theme.textTheme.titleMedium),
           const SizedBox(height: 8),
-          Text('Status: ${turn.status.name}'),
+          Text(presentation.inlineLabel),
           if (turn.failureSummary case final String failureSummary) ...[
             const SizedBox(height: 8),
-            Text('Failure: $failureSummary'),
+            Text('Failure summary: $failureSummary'),
           ],
         ],
       ),
     );
   }
+}
+
+final class _TurnLifecyclePresentation {
+  const _TurnLifecyclePresentation._({required this.inlineLabel});
+
+  factory _TurnLifecyclePresentation.fromTurn(
+    Turn turn, {
+    required bool isActiveTurn,
+  }) {
+    return _TurnLifecyclePresentation._(
+      inlineLabel: switch (turn.status) {
+        TurnStatus.queued =>
+          isActiveTurn ? 'Lifecycle: active (queued)' : 'Lifecycle: queued',
+        TurnStatus.running =>
+          isActiveTurn ? 'Lifecycle: active (running)' : 'Lifecycle: running',
+        TurnStatus.completed => 'Outcome: completed',
+        TurnStatus.failed => 'Outcome: failed',
+      },
+    );
+  }
+
+  final String inlineLabel;
 }
 
 class _SessionSection extends StatelessWidget {
