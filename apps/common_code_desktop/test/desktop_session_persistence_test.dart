@@ -3,9 +3,9 @@ import 'dart:convert';
 import 'package:common_code_desktop/src/desktop_session_runtime.dart';
 import 'package:common_code_desktop/src/desktop_session_snapshot_codec.dart';
 import 'package:common_code_desktop/src/desktop_session_snapshot_store.dart';
+import 'package:common_code_desktop/src/durable_local_host_service.dart';
 import 'package:common_code_domain/common_code_domain.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:host_core/host_core.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 void main() {
@@ -14,62 +14,15 @@ void main() {
   group('DesktopSessionSnapshotJsonCodec', () {
     const codec = DesktopSessionSnapshotJsonCodec();
 
-    test(
-      'round-trips schema 2 notifications without storing input client field',
-      () {
-        final encoded = codec.encode(_runningRestoredSession());
-        final decoded = codec.decode(
-          encoded,
-          desktopClientId: 'desktop-client',
-        );
-
-        expect(encoded.containsKey('inputClient'), isFalse);
-        expect(encoded['schemaVersion'], 2);
-        expect(decoded.id, 'restored-session');
-        expect(decoded.activeHost.id, 'restored-host');
-        expect(decoded.clients.map((client) => client.id).toList(), [
-          'desktop-client',
-          'reviewer-client',
-        ]);
-        expect(
-          decoded.promptThread.turns.map((turn) => turn.submittedText).toList(),
-          ['First submitted turn', 'Second submitted turn'],
-        );
-        expect(decoded.promptThread.turns.map((turn) => turn.status).toList(), [
-          TurnStatus.completed,
-          TurnStatus.running,
-        ]);
-        expect(decoded.activeTurn?.id, 'turn-2');
-        expect(decoded.inputClient?.id, 'reviewer-client');
-        expect(decoded.notifications, _runningRestoredSession().notifications);
-      },
-    );
-
-    test('preserves failure summary for failed turns', () {
+    test('round-trips schema 2 notifications without synthesis', () {
+      final encoded = codec.encode(_runningSessionWithNotifications());
       final decoded = codec.decode(
-        codec.encode(_failedRestoredSession()),
-        desktopClientId: 'desktop-client',
+        encoded,
+        desktopClientId: desktopSessionRuntimeAttachedClientId,
       );
 
-      expect(decoded.activeTurn, isNull);
-      expect(decoded.inputClient, isNull);
-      expect(
-        decoded.promptThread.turns.single.failureSummary,
-        'Restored failure.',
-      );
-    });
-
-    test('rejects unknown schema versions', () {
-      expect(
-        () => codec.decode(<String, Object?>{
-          'schemaVersion': 99,
-          'sessionId': 'restored-session',
-          'activeHostId': 'restored-host',
-          'clientIds': ['desktop-client'],
-          'turns': <Object?>[],
-        }, desktopClientId: 'desktop-client'),
-        throwsA(isA<FormatException>()),
-      );
+      expectSessionLike(decoded, _runningSessionWithNotifications());
+      expect(encoded['schemaVersion'], 2);
     });
 
     test('schema 1 restore yields empty notifications', () {
@@ -77,167 +30,90 @@ void main() {
         'schemaVersion': 1,
         'sessionId': 'restored-session',
         'activeHostId': 'restored-host',
-        'clientIds': ['desktop-client', 'reviewer-client'],
+        'clientIds': <String>[
+          desktopSessionRuntimeAttachedClientId,
+          'reviewer-client',
+        ],
         'turns': <Map<String, Object?>>[
-          {
+          <String, Object?>{
             'id': 'turn-1',
             'clientId': 'reviewer-client',
-            'submittedText': 'First submitted turn',
+            'submittedText': 'Completed turn',
             'status': 'completed',
             'failureSummary': null,
           },
-          {
-            'id': 'turn-2',
-            'clientId': 'reviewer-client',
-            'submittedText': 'Second submitted turn',
-            'status': 'running',
-            'failureSummary': null,
-          },
         ],
-      }, desktopClientId: 'desktop-client');
+      }, desktopClientId: desktopSessionRuntimeAttachedClientId);
 
       expect(decoded.notifications, isEmpty);
-      expect(decoded.activeTurn?.status, TurnStatus.running);
     });
-
-    test(
-      'schema 1 restore does not synthesize notifications from turn state',
-      () {
-        final decoded = codec.decode(<String, Object?>{
-          'schemaVersion': 1,
-          'sessionId': 'restored-session',
-          'activeHostId': 'restored-host',
-          'clientIds': ['desktop-client', 'reviewer-client'],
-          'turns': <Map<String, Object?>>[
-            {
-              'id': 'turn-1',
-              'clientId': 'reviewer-client',
-              'submittedText': 'Failed submitted turn',
-              'status': 'failed',
-              'failureSummary': 'Restored failure.',
-            },
-          ],
-        }, desktopClientId: 'desktop-client');
-
-        expect(decoded.notifications, isEmpty);
-      },
-    );
   });
 
-  group('SharedPreferencesDesktopSessionSnapshotStore', () {
+  group('SharedPreferencesDurableLocalHostStorage', () {
     setUp(() {
       SharedPreferences.setMockInitialValues(<String, Object>{});
     });
 
-    test('returns null when no snapshot exists', () async {
-      final store = SharedPreferencesDesktopSessionSnapshotStore();
+    test('writes and reads durable payload and marker', () async {
+      final storage = SharedPreferencesDurableLocalHostStorage();
 
+      await storage.writeSessionPayload('payload');
+      expect(await storage.readSessionPayload(), 'payload');
       expect(
-        await store.readLatestSession(desktopClientId: 'desktop-client'),
-        isNull,
-      );
-    });
-
-    test('returns null when stored JSON is malformed', () async {
-      SharedPreferences.setMockInitialValues(<String, Object>{
-        SharedPreferencesDesktopSessionSnapshotStore.storageKey: '{bad-json',
-      });
-      final store = SharedPreferencesDesktopSessionSnapshotStore();
-
-      expect(
-        await store.readLatestSession(desktopClientId: 'desktop-client'),
-        isNull,
-      );
-    });
-
-    test('returns null when stored JSON is semantically invalid', () async {
-      SharedPreferences.setMockInitialValues(<String, Object>{
-        SharedPreferencesDesktopSessionSnapshotStore.storageKey: jsonEncode(
-          <String, Object?>{
-            'schemaVersion': 1,
-            'sessionId': 'restored-session',
-            'activeHostId': 'restored-host',
-            'clientIds': <String>['reviewer-client'],
-            'turns': <Object?>[],
-          },
+        await storage.isLegacySeedEnabled(
+          desktopClientId: desktopSessionRuntimeAttachedClientId,
         ),
-      });
-      final store = SharedPreferencesDesktopSessionSnapshotStore();
+        isTrue,
+      );
 
+      await storage.disableLegacySeed(
+        desktopClientId: desktopSessionRuntimeAttachedClientId,
+      );
       expect(
-        await store.readLatestSession(desktopClientId: 'desktop-client'),
-        isNull,
+        await storage.isLegacySeedEnabled(
+          desktopClientId: desktopSessionRuntimeAttachedClientId,
+        ),
+        isFalse,
       );
-    });
-
-    test('writes and reads a valid snapshot', () async {
-      final store = SharedPreferencesDesktopSessionSnapshotStore();
-
-      await store.writeLatestSession(_runningRestoredSession());
-      final restored = await store.readLatestSession(
-        desktopClientId: 'desktop-client',
-      );
-
-      expect(restored, isNotNull);
-      expect(restored!.id, 'restored-session');
-      expect(restored.activeHost.id, 'restored-host');
-      expect(restored.activeTurn?.status, TurnStatus.running);
     });
   });
 
-  group('HostDesktopSessionRuntime persistence behavior', () {
-    test(
-      'falls back to fresh bootstrap when no stored snapshot exists',
-      () async {
-        final runtime = HostDesktopSessionRuntime(
-          hostService: createInMemoryHostService(),
-          snapshotStore: _FakeSnapshotStore(),
-        );
-        Session? snapshot;
-        runtime.bind(
-          onSnapshot: (session) => snapshot = session,
-          onWatchError: (error, stackTrace) {},
-        );
-
-        await runtime.initialize();
-
-        expect(snapshot, isNotNull);
-        expect(snapshot!.id, 'desktop-session');
-        expect(snapshot!.activeHost.id, 'desktop-host');
-        expect(snapshot!.clients.map((client) => client.id), [
-          'desktop-client',
-        ]);
-        expect(snapshot!.activeTurn, isNull);
-      },
-    );
-
-    test(
-      'falls back to fresh bootstrap when stored snapshot is invalid',
-      () async {
-        final runtime = HostDesktopSessionRuntime(
-          hostService: createInMemoryHostService(),
-          snapshotStore: _FakeSnapshotStore(storedSession: null),
-        );
-        Session? snapshot;
-        runtime.bind(
-          onSnapshot: (session) => snapshot = session,
-          onWatchError: (error, stackTrace) {},
-        );
-
-        await runtime.initialize();
-
-        expect(snapshot, isNotNull);
-        expect(snapshot!.id, 'desktop-session');
-      },
-    );
-
-    test('restores a valid stored snapshot and preserves identities', () async {
-      final runtime = HostDesktopSessionRuntime(
-        hostService: createInMemoryHostService(),
-        snapshotStore: _FakeSnapshotStore(
-          storedSession: _runningRestoredSession(),
-        ),
+  group('desktop durable continuity compatibility', () {
+    test('eligible legacy snapshot seeds durable state once', () async {
+      final storage = _MemoryDurableStorage();
+      final legacyStore = _MemoryLegacySnapshotStore(
+        storedSession: _completedSessionWithNotifications(),
       );
+      final hostService = DurableLocalHostService(
+        durableStorage: storage,
+        legacySnapshotStore: legacyStore,
+      );
+      final runtime = HostDesktopSessionRuntime(hostService: hostService);
+      Session? snapshot;
+      runtime.bind(
+        onSnapshot: (session) => snapshot = session,
+        onWatchError: (error, stackTrace) {},
+      );
+
+      await runtime.initialize();
+      await hostService.flushPendingWrites();
+
+      expectSessionLike(snapshot!, _completedSessionWithNotifications());
+      expect(storage.payload, isNotNull);
+      expect(storage.legacySeedEnabled, isFalse);
+    });
+
+    test('missing ineligible branch boots fresh instead of seeding', () async {
+      final diagnostics = <DurableLocalHostDiagnosticCode>[];
+      final storage = _MemoryDurableStorage(legacySeedEnabled: false);
+      final hostService = DurableLocalHostService(
+        durableStorage: storage,
+        legacySnapshotStore: _MemoryLegacySnapshotStore(
+          storedSession: _completedSessionWithNotifications(),
+        ),
+        diagnosticsSink: (diagnostic) => diagnostics.add(diagnostic.code),
+      );
+      final runtime = HostDesktopSessionRuntime(hostService: hostService);
       Session? snapshot;
       runtime.bind(
         onSnapshot: (session) => snapshot = session,
@@ -247,115 +123,30 @@ void main() {
       await runtime.initialize();
 
       expect(snapshot, isNotNull);
-      expect(snapshot!.id, 'restored-session');
-      expect(snapshot!.activeHost.id, 'restored-host');
-      expect(snapshot!.clients.map((client) => client.id).toList(), [
-        'desktop-client',
-        'reviewer-client',
-      ]);
+      expect(snapshot!.id, desktopSessionRuntimeDefaultSessionId);
       expect(
-        snapshot!.promptThread.turns.map((turn) => turn.submittedText).toList(),
-        ['First submitted turn', 'Second submitted turn'],
+        diagnostics,
+        containsAllInOrder(<DurableLocalHostDiagnosticCode>[
+          DurableLocalHostDiagnosticCode.durableReadMissing,
+          DurableLocalHostDiagnosticCode.legacySeedSkipped,
+          DurableLocalHostDiagnosticCode.freshBootstrapActivated,
+        ]),
       );
-      expect(snapshot!.activeTurn?.status, TurnStatus.running);
-      expect(snapshot!.inputClient?.id, 'reviewer-client');
     });
 
-    test(
-      'restored queued snapshot remains frozen as last-known state',
-      () async {
-        final hostService = createInMemoryHostService(
-          simulationPolicy: const HostExecutionSimulationPolicy(
-            queuedToRunningDelay: Duration.zero,
-            runningToTerminalDelay: Duration.zero,
-          ),
-        );
-        final runtime = HostDesktopSessionRuntime(
-          hostService: hostService,
-          snapshotStore: _FakeSnapshotStore(
-            storedSession: _queuedRestoredSession(),
-          ),
-        );
-        Session? snapshot;
-        runtime.bind(
-          onSnapshot: (session) => snapshot = session,
-          onWatchError: (error, stackTrace) {},
-        );
-
-        await runtime.initialize();
-
-        expect(snapshot, isNotNull);
-        expect(snapshot!.activeTurn?.status, TurnStatus.queued);
-        expect(snapshot!.inputClient?.id, 'reviewer-client');
-        expect(snapshot!.notifications, isEmpty);
-        expect(
-          hostService.readSession('restored-session').activeTurn?.status,
-          TurnStatus.queued,
-        );
-      },
-    );
-
-    test(
-      'restored running snapshot remains frozen as last-known state',
-      () async {
-        final hostService = createInMemoryHostService(
-          simulationPolicy: const HostExecutionSimulationPolicy(
-            queuedToRunningDelay: Duration.zero,
-            runningToTerminalDelay: Duration.zero,
-          ),
-        );
-        final runtime = HostDesktopSessionRuntime(
-          hostService: hostService,
-          snapshotStore: _FakeSnapshotStore(
-            storedSession: _runningRestoredSession(),
-          ),
-        );
-        Session? snapshot;
-        runtime.bind(
-          onSnapshot: (session) => snapshot = session,
-          onWatchError: (error, stackTrace) {},
-        );
-
-        await runtime.initialize();
-
-        expect(snapshot, isNotNull);
-        expect(snapshot!.activeTurn?.status, TurnStatus.running);
-        expect(snapshot!.inputClient?.id, 'reviewer-client');
-        expect(snapshot!.notifications, _runningRestoredSession().notifications);
-        expect(
-          hostService.readSession('restored-session').activeTurn?.status,
-          TurnStatus.running,
-        );
-      },
-    );
-
-    test('restored completed snapshot keeps input client at none', () async {
-      final runtime = HostDesktopSessionRuntime(
-        hostService: createInMemoryHostService(),
-        snapshotStore: _FakeSnapshotStore(
-          storedSession: _completedRestoredSession(),
+    test('corrupt ineligible branch boots fresh instead of seeding', () async {
+      final diagnostics = <DurableLocalHostDiagnosticCode>[];
+      final hostService = DurableLocalHostService(
+        durableStorage: _MemoryDurableStorage(
+          payload: '{bad-json',
+          legacySeedEnabled: false,
         ),
-      );
-      Session? snapshot;
-      runtime.bind(
-        onSnapshot: (session) => snapshot = session,
-        onWatchError: (error, stackTrace) {},
-      );
-
-      await runtime.initialize();
-
-      expect(snapshot!.activeTurn, isNull);
-      expect(snapshot!.inputClient, isNull);
-      expect(snapshot!.notifications, _completedRestoredSession().notifications);
-    });
-
-    test('restored failed snapshot keeps input client at none', () async {
-      final runtime = HostDesktopSessionRuntime(
-        hostService: createInMemoryHostService(),
-        snapshotStore: _FakeSnapshotStore(
-          storedSession: _failedRestoredSession(),
+        legacySnapshotStore: _MemoryLegacySnapshotStore(
+          storedSession: _completedSessionWithNotifications(),
         ),
+        diagnosticsSink: (diagnostic) => diagnostics.add(diagnostic.code),
       );
+      final runtime = HostDesktopSessionRuntime(hostService: hostService);
       Session? snapshot;
       runtime.bind(
         onSnapshot: (session) => snapshot = session,
@@ -363,124 +154,184 @@ void main() {
       );
 
       await runtime.initialize();
-
-      expect(snapshot!.activeTurn, isNull);
-      expect(snapshot!.inputClient, isNull);
-      expect(snapshot!.notifications, _failedRestoredSession().notifications);
-      expect(
-        snapshot!.promptThread.turns.single.failureSummary,
-        'Restored failure.',
-      );
-    });
-
-    test('watch writes each emitted snapshot back to storage', () async {
-      final store = _FakeSnapshotStore();
-      final runtime = HostDesktopSessionRuntime(
-        hostService: createInMemoryHostService(),
-        snapshotStore: store,
-      );
-      runtime.bind(
-        onSnapshot: (session) {},
-        onWatchError: (error, stackTrace) {},
-      );
-
-      await runtime.initialize();
-      await Future<void>.delayed(Duration.zero);
-
-      expect(store.writtenSessions, isNotEmpty);
-      expect(store.writtenSessions.single.id, 'desktop-session');
-    });
-
-    test('persistence write failures are non-fatal to live state', () async {
-      final runtime = HostDesktopSessionRuntime(
-        hostService: createInMemoryHostService(),
-        snapshotStore: _ThrowingSnapshotStore(),
-      );
-      Session? snapshot;
-      runtime.bind(
-        onSnapshot: (session) => snapshot = session,
-        onWatchError: (error, stackTrace) {},
-      );
-
-      await runtime.initialize();
-      await Future<void>.delayed(Duration.zero);
 
       expect(snapshot, isNotNull);
-      expect(snapshot!.id, 'desktop-session');
+      expect(snapshot!.id, desktopSessionRuntimeDefaultSessionId);
+      expect(
+        diagnostics,
+        containsAllInOrder(<DurableLocalHostDiagnosticCode>[
+          DurableLocalHostDiagnosticCode.durableReadCorruptOrInvalid,
+          DurableLocalHostDiagnosticCode.legacySeedSkipped,
+          DurableLocalHostDiagnosticCode.freshBootstrapActivated,
+        ]),
+      );
     });
+
+    test(
+      'after first successful durable write bootstrap ignores legacy shadow data',
+      () async {
+        final storage = _MemoryDurableStorage(
+          payload: jsonEncode(
+            const DesktopSessionSnapshotJsonCodec().encode(
+              _runningSessionWithNotifications(),
+            ),
+          ),
+          legacySeedEnabled: false,
+        );
+        final runtime = HostDesktopSessionRuntime(
+          hostServiceFactory: () => DurableLocalHostService(
+            durableStorage: storage,
+            legacySnapshotStore: _MemoryLegacySnapshotStore(
+              storedSession: _completedSessionWithNotifications(),
+            ),
+          ),
+        );
+        Session? snapshot;
+        runtime.bind(
+          onSnapshot: (session) => snapshot = session,
+          onWatchError: (error, stackTrace) {},
+        );
+
+        await runtime.initialize();
+
+        expectSessionLike(snapshot!, _runningSessionWithNotifications());
+      },
+    );
+
+    test(
+      'acknowledged notifications stay non-replayable after restart while unacknowledged remain replayable',
+      () async {
+        final runtime = HostDesktopSessionRuntime(
+          hostServiceFactory: () => DurableLocalHostService(
+            durableStorage: _MemoryDurableStorage(
+              payload: jsonEncode(
+                const DesktopSessionSnapshotJsonCodec().encode(
+                  _runningSessionWithNotifications(),
+                ),
+              ),
+            ),
+            legacySnapshotStore: _MemoryLegacySnapshotStore(),
+          ),
+        );
+        Session? snapshot;
+        runtime.bind(
+          onSnapshot: (session) => snapshot = session,
+          onWatchError: (error, stackTrace) {},
+        );
+
+        await runtime.initialize();
+
+        final replayableNotifications = snapshot!.notifications
+            .where((notification) => !notification.isAcknowledged)
+            .toList(growable: false);
+        final acknowledgedNotifications = snapshot!.notifications
+            .where((notification) => notification.isAcknowledged)
+            .toList(growable: false);
+
+        expect(replayableNotifications, hasLength(2));
+        expect(acknowledgedNotifications, hasLength(1));
+      },
+    );
   });
 }
 
-Session _baseRestoredSession() {
-  const desktopClient = Client(id: 'desktop-client');
-  const reviewerClient = Client(id: 'reviewer-client');
-
-  return Session(
-    id: 'restored-session',
-    activeHost: const Host(id: 'restored-host'),
-  ).attachClient(desktopClient).attachClient(reviewerClient);
-}
-
-Session _queuedRestoredSession() {
-  const reviewerClient = Client(id: 'reviewer-client');
-
-  return _baseRestoredSession().startTurn(
-    turnId: 'turn-1',
-    client: reviewerClient,
-    submittedText: 'Queued submitted turn',
+void expectSessionLike(Session actual, Session expected) {
+  expect(actual.id, expected.id);
+  expect(actual.activeHost.id, expected.activeHost.id);
+  expect(
+    actual.clients.map((client) => client.id).toList(growable: false),
+    expected.clients.map((client) => client.id).toList(growable: false),
+  );
+  expect(
+    actual.promptThread.turns.map(_turnSignature).toList(growable: false),
+    expected.promptThread.turns.map(_turnSignature).toList(growable: false),
+  );
+  expect(
+    actual.notifications.map(_notificationSignature).toList(growable: false),
+    expected.notifications.map(_notificationSignature).toList(growable: false),
   );
 }
 
-Session _runningRestoredSession() {
-  const reviewerClient = Client(id: 'reviewer-client');
+Map<String, Object?> _turnSignature(Turn turn) {
+  return <String, Object?>{
+    'id': turn.id,
+    'clientId': turn.clientId,
+    'submittedText': turn.submittedText,
+    'status': turn.status,
+    'failureSummary': turn.failureSummary,
+  };
+}
 
-  return _baseRestoredSession()
+Map<String, Object?> _notificationSignature(SessionNotification notification) {
+  return <String, Object?>{
+    'id': notification.id,
+    'turnId': notification.turnId,
+    'transition': notification.transition,
+    'isAcknowledged': notification.isAcknowledged,
+  };
+}
+
+Session _baseSession() {
+  return Session(
+    id: 'restored-session',
+    activeHost: const Host(id: 'restored-host'),
+    clients: const <Client>[
+      Client(id: desktopSessionRuntimeAttachedClientId),
+      Client(id: 'reviewer-client'),
+    ],
+  );
+}
+
+Session _completedSessionWithNotifications() {
+  return _runningSessionWithNotifications().completeActiveTurn();
+}
+
+Session _runningSessionWithNotifications() {
+  final session = _baseSession()
       .startTurn(
         turnId: 'turn-1',
-        client: reviewerClient,
-        submittedText: 'First submitted turn',
+        client: const Client(id: 'reviewer-client'),
+        submittedText: 'First turn',
       )
       .advanceActiveTurnToRunning()
       .completeActiveTurn()
       .startTurn(
         turnId: 'turn-2',
-        client: reviewerClient,
-        submittedText: 'Second submitted turn',
+        client: const Client(id: 'reviewer-client'),
+        submittedText: 'Second turn',
       )
       .advanceActiveTurnToRunning();
-}
 
-Session _completedRestoredSession() {
-  const reviewerClient = Client(id: 'reviewer-client');
-
-  return _baseRestoredSession()
-      .startTurn(
+  return Session(
+    id: session.id,
+    activeHost: session.activeHost,
+    clients: session.clients,
+    promptThread: session.promptThread,
+    notifications: <SessionNotification>[
+      SessionNotification.forTransition(
+        sessionId: session.id,
         turnId: 'turn-1',
-        client: reviewerClient,
-        submittedText: 'Completed submitted turn',
-      )
-      .advanceActiveTurnToRunning()
-      .completeActiveTurn();
-}
-
-Session _failedRestoredSession() {
-  const reviewerClient = Client(id: 'reviewer-client');
-
-  return _baseRestoredSession()
-      .startTurn(
+        transition: SessionNotificationTransition.queuedToRunning,
+      ),
+      SessionNotification.forTransition(
+        sessionId: session.id,
         turnId: 'turn-1',
-        client: reviewerClient,
-        submittedText: 'Failed submitted turn',
-      )
-      .advanceActiveTurnToRunning()
-      .failActiveTurn(failureSummary: 'Restored failure.');
+        transition: SessionNotificationTransition.runningToCompleted,
+        isAcknowledged: true,
+      ),
+      SessionNotification.forTransition(
+        sessionId: session.id,
+        turnId: 'turn-2',
+        transition: SessionNotificationTransition.queuedToRunning,
+      ),
+    ],
+  );
 }
 
-final class _FakeSnapshotStore implements DesktopSessionSnapshotStore {
-  _FakeSnapshotStore({this.storedSession});
+final class _MemoryLegacySnapshotStore implements DesktopSessionSnapshotStore {
+  _MemoryLegacySnapshotStore({this.storedSession});
 
   final Session? storedSession;
-  final List<Session> writtenSessions = <Session>[];
 
   @override
   Future<Session?> readLatestSession({required String desktopClientId}) async {
@@ -488,19 +339,30 @@ final class _FakeSnapshotStore implements DesktopSessionSnapshotStore {
   }
 
   @override
-  Future<void> writeLatestSession(Session session) async {
-    writtenSessions.add(session);
-  }
+  Future<void> writeLatestSession(Session session) async {}
 }
 
-final class _ThrowingSnapshotStore implements DesktopSessionSnapshotStore {
+final class _MemoryDurableStorage implements DurableLocalHostStorage {
+  _MemoryDurableStorage({this.payload, this.legacySeedEnabled = true});
+
+  String? payload;
+  bool legacySeedEnabled;
+
   @override
-  Future<Session?> readLatestSession({required String desktopClientId}) async {
-    return null;
+  Future<void> disableLegacySeed({required String desktopClientId}) async {
+    legacySeedEnabled = false;
   }
 
   @override
-  Future<void> writeLatestSession(Session session) async {
-    throw StateError('persist failed');
+  Future<bool> isLegacySeedEnabled({required String desktopClientId}) async {
+    return legacySeedEnabled;
+  }
+
+  @override
+  Future<String?> readSessionPayload() async => payload;
+
+  @override
+  Future<void> writeSessionPayload(String payload) async {
+    this.payload = payload;
   }
 }

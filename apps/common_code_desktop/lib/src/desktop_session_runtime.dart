@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:common_code_domain/common_code_domain.dart';
 import 'package:host_core/host_core.dart';
 
+import 'durable_local_host_service.dart';
 import 'desktop_session_snapshot_store.dart';
 
 const desktopSessionRuntimeDefaultSessionId = 'desktop-session';
@@ -29,19 +30,26 @@ final class HostDesktopSessionRuntime implements DesktopSessionRuntime {
     HostService? hostService,
     DesktopSessionSnapshotStore? snapshotStore,
     HostService Function()? hostServiceFactory,
+    DurableLocalHostDiagnosticsSink? diagnosticsSink,
     String defaultSessionId = desktopSessionRuntimeDefaultSessionId,
     String hostId = desktopSessionRuntimeHostId,
     String attachedClientId = desktopSessionRuntimeAttachedClientId,
   }) : _hostService = hostService,
-       _snapshotStore =
-           snapshotStore ?? SharedPreferencesDesktopSessionSnapshotStore(),
-       _hostServiceFactory = hostServiceFactory ?? createInMemoryHostService,
+       _legacySnapshotStore =
+            snapshotStore ?? SharedPreferencesDesktopSessionSnapshotStore(),
+       _hostServiceFactory =
+           hostServiceFactory ??
+           (() => DurableLocalHostService(
+             legacySnapshotStore:
+                 snapshotStore ?? SharedPreferencesDesktopSessionSnapshotStore(),
+             diagnosticsSink: diagnosticsSink,
+           )),
        _defaultSessionId = defaultSessionId,
        _hostId = hostId,
        _attachedClientId = attachedClientId;
 
   final HostService? _hostService;
-  final DesktopSessionSnapshotStore _snapshotStore;
+  final DesktopSessionSnapshotStore _legacySnapshotStore;
   final HostService Function() _hostServiceFactory;
   final String _defaultSessionId;
   final String _hostId;
@@ -130,7 +138,6 @@ final class HostDesktopSessionRuntime implements DesktopSessionRuntime {
           if (!firstOutcomeSettled.isCompleted) {
             firstOutcomeSettled.complete();
           }
-          unawaited(_persistSnapshot(session));
         },
         onError: (Object error, StackTrace stackTrace) {
           if (_isStaleGeneration(generation)) {
@@ -161,7 +168,18 @@ final class HostDesktopSessionRuntime implements DesktopSessionRuntime {
       return;
     }
 
-    final restoredSession = await _snapshotStore.readLatestSession(
+    if (service case final DurableLocalHostService durableService) {
+      final bootstrappedSession = await durableService.bootstrap(
+        defaultSessionId: _defaultSessionId,
+        hostId: _hostId,
+        desktopClientId: _attachedClientId,
+      );
+      _currentSessionId = bootstrappedSession.id;
+      _isBootstrapped = true;
+      return;
+    }
+
+    final restoredSession = await _legacySnapshotStore.readLatestSession(
       desktopClientId: _attachedClientId,
     );
     if (restoredSession != null) {
@@ -185,14 +203,6 @@ final class HostDesktopSessionRuntime implements DesktopSessionRuntime {
     );
     _currentSessionId = _defaultSessionId;
     _isBootstrapped = true;
-  }
-
-  Future<void> _persistSnapshot(Session session) async {
-    try {
-      await _snapshotStore.writeLatestSession(session);
-    } catch (_) {
-      // Persisting the mirror snapshot must not break the live host-backed UI.
-    }
   }
 
   bool _isStaleGeneration(int generation) {
