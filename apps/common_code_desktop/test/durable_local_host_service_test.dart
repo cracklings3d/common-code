@@ -476,6 +476,47 @@ void main() {
       expect(turnOnlySession.notifications, isEmpty);
     });
 
+    test('live acknowledgement updates durable session notification state', () async {
+      final service = DurableLocalHostService(
+        durableStorage: _MemoryDurableStorage(
+          payload: jsonEncode(
+            const DesktopSessionSnapshotJsonCodec().encode(
+              _runningSessionWithNotifications(),
+            ),
+          ),
+        ),
+        legacySnapshotStore: _MemoryLegacySnapshotStore(),
+      );
+
+      final session = await service.bootstrap(
+        defaultSessionId: desktopSessionRuntimeDefaultSessionId,
+        hostId: desktopSessionRuntimeHostId,
+        desktopClientId: desktopSessionRuntimeAttachedClientId,
+      );
+      final notificationId = session.notifications.firstWhere(
+        (notification) => !notification.isAcknowledged,
+      ).id;
+
+      final acknowledgedSession = service.acknowledgeNotification(
+        sessionId: session.id,
+        notificationId: notificationId,
+      );
+      await service.flushPendingWrites();
+
+      expect(
+        acknowledgedSession.notifications.firstWhere(
+          (notification) => notification.id == notificationId,
+        ).isAcknowledged,
+        isTrue,
+      );
+      expect(
+        service.readSession(session.id).notifications.firstWhere(
+          (notification) => notification.id == notificationId,
+        ).isAcknowledged,
+        isTrue,
+      );
+    });
+
     test(
       'first successful durable write disables later legacy seeding',
       () async {
