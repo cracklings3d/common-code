@@ -229,6 +229,38 @@ void main() {
       );
     });
 
+    test('acknowledgement survives refresh in the same runtime', () async {
+      final hostService = DurableLocalHostService(
+        durableStorage: _MemoryDurableStorage(
+          payload: jsonEncode(
+            const DesktopSessionSnapshotJsonCodec().encode(
+              _runningSessionWithNotifications(),
+            ),
+          ),
+        ),
+        legacySnapshotStore: _MemoryLegacySnapshotStore(),
+      );
+      final runtime = HostDesktopSessionRuntime(hostService: hostService);
+      final snapshots = <Session>[];
+      runtime.bind(
+        onSnapshot: snapshots.add,
+        onWatchError: (error, stackTrace) {},
+      );
+
+      await runtime.initialize();
+      final notificationId = snapshots.last.notifications.firstWhere(
+        (notification) => !notification.isAcknowledged,
+      ).id;
+
+      await runtime.acknowledgeNotification(notificationId: notificationId);
+      await runtime.refresh();
+
+      final refreshedNotification = snapshots.last.notifications.firstWhere(
+        (notification) => notification.id == notificationId,
+      );
+      expect(refreshedNotification.isAcknowledged, isTrue);
+    });
+
     test('queued and running turns remain frozen after restart', () async {
       final queuedRuntime = HostDesktopSessionRuntime(
         hostServiceFactory: () => DurableLocalHostService(
@@ -522,6 +554,44 @@ final class _TrackingHostService implements HostService {
   int watchStarts = 0;
   int watchCancels = 0;
   bool concurrentWatchViolation = false;
+
+  @override
+  Session acknowledgeNotification({
+    required String sessionId,
+    required String notificationId,
+  }) {
+    final session = _sessions[sessionId]!;
+    var didAcknowledge = false;
+    final updatedSession = Session(
+      id: session.id,
+      activeHost: session.activeHost,
+      clients: session.clients,
+      promptThread: session.promptThread,
+      notifications: [
+        for (final notification in session.notifications)
+          if (notification.id == notificationId && !notification.isAcknowledged)
+            () {
+              didAcknowledge = true;
+              return SessionNotification.forTransition(
+                sessionId: session.id,
+                turnId: notification.turnId,
+                transition: notification.transition,
+                isAcknowledged: true,
+              );
+            }()
+          else
+            notification,
+      ],
+    );
+
+    if (!didAcknowledge) {
+      return session;
+    }
+
+    _sessions[sessionId] = updatedSession;
+    _controllers[sessionId]?.add(updatedSession);
+    return updatedSession;
+  }
 
   @override
   Session attachClient({required String sessionId, required Client client}) {

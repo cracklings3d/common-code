@@ -232,6 +232,63 @@ void main() {
         expect(acknowledgedNotifications, hasLength(1));
       },
     );
+
+    test('live acknowledgement persists across full restart', () async {
+      final storage = _MemoryDurableStorage(
+        payload: jsonEncode(
+          const DesktopSessionSnapshotJsonCodec().encode(
+            _runningSessionWithNotifications(),
+          ),
+        ),
+      );
+      final firstHostService = DurableLocalHostService(
+        durableStorage: storage,
+        legacySnapshotStore: _MemoryLegacySnapshotStore(),
+      );
+      final firstRuntime = HostDesktopSessionRuntime(hostService: firstHostService);
+      Session? firstSnapshot;
+      firstRuntime.bind(
+        onSnapshot: (session) => firstSnapshot = session,
+        onWatchError: (error, stackTrace) {},
+      );
+
+      await firstRuntime.initialize();
+      final acknowledgedNotificationId = firstSnapshot!.notifications.firstWhere(
+        (notification) => !notification.isAcknowledged,
+      ).id;
+
+      await firstRuntime.acknowledgeNotification(
+        notificationId: acknowledgedNotificationId,
+      );
+      await firstHostService.flushPendingWrites();
+
+      final restartedRuntime = HostDesktopSessionRuntime(
+        hostService: DurableLocalHostService(
+          durableStorage: storage,
+          legacySnapshotStore: _MemoryLegacySnapshotStore(),
+        ),
+      );
+      Session? restartedSnapshot;
+      restartedRuntime.bind(
+        onSnapshot: (session) => restartedSnapshot = session,
+        onWatchError: (error, stackTrace) {},
+      );
+
+      await restartedRuntime.initialize();
+
+      expect(
+        restartedSnapshot!.notifications.firstWhere(
+          (notification) => notification.id == acknowledgedNotificationId,
+        ).isAcknowledged,
+        isTrue,
+      );
+      expect(
+        restartedSnapshot!.notifications.where(
+          (notification) => !notification.isAcknowledged,
+        ),
+        isNotEmpty,
+      );
+    });
   });
 }
 

@@ -76,6 +76,39 @@ void main() {
       expect(updatedSession.inputClient, client);
     });
 
+    test('acknowledges one notification through the host boundary', () async {
+      final service = createInMemoryHostService(
+        simulationPolicy: const HostExecutionSimulationPolicy(
+          queuedToRunningDelay: Duration.zero,
+          runningToTerminalDelay: Duration.zero,
+        ),
+      );
+
+      service.createSession(sessionId: 'session-1', activeHost: host);
+      service.attachClient(sessionId: 'session-1', client: client);
+      final completedSnapshots = service.watchSession('session-1').take(4).toList();
+
+      service.submitTurn(
+        sessionId: 'session-1',
+        client: client,
+        submittedText: 'Observe acknowledgement.',
+      );
+
+      final completedSession = (await completedSnapshots).last;
+      final notificationId = completedSession.notifications.first.id;
+      final acknowledgedSession = service.acknowledgeNotification(
+        sessionId: 'session-1',
+        notificationId: notificationId,
+      );
+
+      expect(
+        acknowledgedSession.notifications.firstWhere(
+          (notification) => notification.id == notificationId,
+        ).isAcknowledged,
+        isTrue,
+      );
+    });
+
     test('submitTurn persists the updated session for subsequent reads', () {
       final service = createInMemoryHostService(
         simulationPolicy: const HostExecutionSimulationPolicy(

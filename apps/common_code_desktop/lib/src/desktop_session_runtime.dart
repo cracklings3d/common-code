@@ -20,6 +20,8 @@ abstract interface class DesktopSessionRuntime {
 
   Future<void> refresh();
 
+  Future<void> acknowledgeNotification({required String notificationId});
+
   Future<void> submitTurn({required String submittedText});
 
   Future<void> dispose();
@@ -79,6 +81,17 @@ final class HostDesktopSessionRuntime implements DesktopSessionRuntime {
 
   @override
   Future<void> refresh() => _startSessionWatch();
+
+  @override
+  Future<void> acknowledgeNotification({required String notificationId}) async {
+    final service = _service ??= _hostService ?? _hostServiceFactory();
+    await _bootstrapIfNeeded();
+
+    service.acknowledgeNotification(
+      sessionId: _currentSessionId!,
+      notificationId: notificationId,
+    );
+  }
 
   @override
   Future<void> submitTurn({required String submittedText}) async {

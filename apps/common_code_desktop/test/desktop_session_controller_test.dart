@@ -103,6 +103,29 @@ void main() {
       },
     );
 
+    test(
+      'acknowledgement failure surfaces on data state and clears busy flag',
+      () async {
+        final runtime = _FakeDesktopSessionRuntime()
+          ..acknowledgeError = StateError('ack failed');
+        final controller = DesktopSessionController(runtime: runtime);
+
+        runtime.emitSnapshot(_sessionWithNotification());
+
+        await expectLater(
+          controller.acknowledgeNotification(notificationId: 'notification-1'),
+          throwsA(isA<StateError>()),
+        );
+
+        expect(controller.state.status, DesktopSessionControllerStatus.data);
+        expect(controller.state.isAcknowledgingNotification, isFalse);
+        expect(
+          controller.state.acknowledgementErrorMessage,
+          contains('ack failed'),
+        );
+      },
+    );
+
     test('controller ignores late runtime events after disposal', () async {
       final runtime = _FakeDesktopSessionRuntime();
       final controller = DesktopSessionController(runtime: runtime);
@@ -146,10 +169,12 @@ final class _FakeDesktopSessionRuntime implements DesktopSessionRuntime {
   void Function(Object error, StackTrace stackTrace)? _onWatchError;
 
   final List<String> submittedTexts = <String>[];
+  final List<String> acknowledgedNotificationIds = <String>[];
   Completer<void>? _pendingInitialize;
   Completer<void>? _pendingRefresh;
   Completer<void>? _pendingSubmit;
   Object? submitError;
+  Object? acknowledgeError;
 
   @override
   void bind({
@@ -186,6 +211,16 @@ final class _FakeDesktopSessionRuntime implements DesktopSessionRuntime {
     return completer.future;
   }
 
+  @override
+  Future<void> acknowledgeNotification({required String notificationId}) {
+    acknowledgedNotificationIds.add(notificationId);
+    if (acknowledgeError case final Object error) {
+      return Future<void>.error(error);
+    }
+
+    return Future<void>.value();
+  }
+
   void emitSnapshot(Session session) {
     _onSnapshot?.call(session);
     _pendingInitialize?.complete();
@@ -213,4 +248,28 @@ final class _FakeDesktopSessionRuntime implements DesktopSessionRuntime {
     _pendingRefresh?.complete();
     _pendingSubmit?.complete();
   }
+}
+
+Session _sessionWithNotification() {
+  final runningSession = _bootstrapSession()
+      .startTurn(
+        turnId: 'turn-1',
+        client: const Client(id: 'desktop-client'),
+        submittedText: 'queued turn',
+      )
+      .advanceActiveTurnToRunning();
+
+  return Session(
+    id: runningSession.id,
+    activeHost: runningSession.activeHost,
+    clients: runningSession.clients,
+    promptThread: runningSession.promptThread,
+    notifications: [
+      SessionNotification.forTransition(
+        sessionId: 'desktop-session',
+        turnId: 'turn-1',
+        transition: SessionNotificationTransition.queuedToRunning,
+      ),
+    ],
+  );
 }
