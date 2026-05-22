@@ -1,0 +1,17 @@
+name: common_code_application
+description: CommonCode application facade for session coordination.
+version: 1.0.0
+publish_to: none
+
+environment:
+  sdk: ^3.11.5
+
+resolution: workspace
+
+dependencies:
+  common_code_domain:
+    path: ../common_code_domain
+
+dev_dependencies:
+  lints: ^6.0.0
+  test: ^1.25.6
