@@ -1,13 +1,13 @@
 import 'package:common_code_domain/common_code_domain.dart';
 
-const int desktopSessionSnapshotSchemaVersion = 2;
+const int sessionSnapshotSchemaVersion = 2;
 
-final class DesktopSessionSnapshotJsonCodec {
-  const DesktopSessionSnapshotJsonCodec();
+final class SessionSnapshotCodec {
+  const SessionSnapshotCodec();
 
   Map<String, Object?> encode(Session session) {
     return <String, Object?>{
-      'schemaVersion': desktopSessionSnapshotSchemaVersion,
+      'schemaVersion': sessionSnapshotSchemaVersion,
       'sessionId': session.id,
       'activeHostId': session.activeHost.id,
       'clientIds': <String>[for (final client in session.clients) client.id],
@@ -24,8 +24,7 @@ final class DesktopSessionSnapshotJsonCodec {
   Session decode(Object? payload, {required String desktopClientId}) {
     final map = _asMap(payload, fieldName: 'snapshot');
     final schemaVersion = map['schemaVersion'];
-    if (schemaVersion != 1 &&
-        schemaVersion != desktopSessionSnapshotSchemaVersion) {
+    if (schemaVersion != 1 && schemaVersion != sessionSnapshotSchemaVersion) {
       throw FormatException('Unknown schema version: $schemaVersion');
     }
 

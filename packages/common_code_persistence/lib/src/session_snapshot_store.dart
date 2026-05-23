@@ -3,18 +3,18 @@ import 'dart:convert';
 import 'package:common_code_domain/common_code_domain.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-import 'desktop_session_snapshot_codec.dart';
+import 'session_snapshot_codec.dart';
 
-abstract interface class DesktopSessionSnapshotStore {
+abstract interface class SessionSnapshotStore {
   Future<Session?> readLatestSession({required String desktopClientId});
 
   Future<void> writeLatestSession(Session session);
 }
 
-final class SharedPreferencesDesktopSessionSnapshotStore
-    implements DesktopSessionSnapshotStore {
-  SharedPreferencesDesktopSessionSnapshotStore({
-    DesktopSessionSnapshotJsonCodec codec = const DesktopSessionSnapshotJsonCodec(),
+final class SharedPreferencesSessionSnapshotStore
+    implements SessionSnapshotStore {
+  SharedPreferencesSessionSnapshotStore({
+    SessionSnapshotCodec codec = const SessionSnapshotCodec(),
     Future<SharedPreferences> Function()? sharedPreferencesFactory,
   }) : _codec = codec,
        _sharedPreferencesFactory =
@@ -22,7 +22,7 @@ final class SharedPreferencesDesktopSessionSnapshotStore
 
   static const storageKey = 'common_code.desktop.latest_session_snapshot.v1';
 
-  final DesktopSessionSnapshotJsonCodec _codec;
+  final SessionSnapshotCodec _codec;
   final Future<SharedPreferences> Function() _sharedPreferencesFactory;
   Future<SharedPreferences>? _sharedPreferences;
 

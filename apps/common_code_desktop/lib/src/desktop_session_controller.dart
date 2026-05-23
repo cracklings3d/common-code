@@ -1,8 +1,10 @@
 import 'dart:async';
 
-import 'package:common_code_application/common_code_application.dart';
 import 'package:common_code_domain/common_code_domain.dart';
 import 'package:flutter/foundation.dart';
+import 'package:host_core/host_core.dart';
+
+import 'package:common_code_persistence/common_code_persistence.dart';
 
 import 'desktop_session_runtime.dart';
 
@@ -19,104 +21,81 @@ final class DesktopSessionSnapshot {
 enum DesktopSessionControllerStatus { loading, empty, data, error }
 
 final class DesktopSessionControllerState {
-  static const Object _unset = Object();
-
   const DesktopSessionControllerState._({
     required this.status,
     this.snapshot,
     this.message,
     required this.isSubmitting,
-    required this.isAcknowledgingNotification,
-    this.acknowledgementErrorMessage,
   });
 
   const DesktopSessionControllerState.loading({bool isSubmitting = false})
     : this._(
         status: DesktopSessionControllerStatus.loading,
         isSubmitting: isSubmitting,
-        isAcknowledgingNotification: false,
       );
 
   const DesktopSessionControllerState.empty({bool isSubmitting = false})
     : this._(
         status: DesktopSessionControllerStatus.empty,
         isSubmitting: isSubmitting,
-        isAcknowledgingNotification: false,
       );
 
   const DesktopSessionControllerState.data(
     DesktopSessionSnapshot this.snapshot, {
     this.isSubmitting = false,
-    this.isAcknowledgingNotification = false,
-    this.acknowledgementErrorMessage,
   }) : status = DesktopSessionControllerStatus.data,
        message = null;
 
   const DesktopSessionControllerState.error(
     String this.message, {
     this.isSubmitting = false,
-    this.isAcknowledgingNotification = false,
   }) : status = DesktopSessionControllerStatus.error,
-       acknowledgementErrorMessage = null,
        snapshot = null;
 
   final DesktopSessionControllerStatus status;
   final DesktopSessionSnapshot? snapshot;
   final String? message;
   final bool isSubmitting;
-  final bool isAcknowledgingNotification;
-  final String? acknowledgementErrorMessage;
 
   DesktopSessionControllerState copyWithSubmitting(bool isSubmitting) {
-    return copyWith(isSubmitting: isSubmitting);
-  }
-
-  DesktopSessionControllerState copyWith({
-    bool? isSubmitting,
-    bool? isAcknowledgingNotification,
-    Object? acknowledgementErrorMessage = _unset,
-  }) {
     return switch (status) {
       DesktopSessionControllerStatus.loading =>
-        DesktopSessionControllerState.loading(
-          isSubmitting: isSubmitting ?? this.isSubmitting,
-        ),
+        DesktopSessionControllerState.loading(isSubmitting: isSubmitting),
       DesktopSessionControllerStatus.empty =>
-        DesktopSessionControllerState.empty(
-          isSubmitting: isSubmitting ?? this.isSubmitting,
-        ),
+        DesktopSessionControllerState.empty(isSubmitting: isSubmitting),
       DesktopSessionControllerStatus.data => DesktopSessionControllerState.data(
         snapshot!,
-        isSubmitting: isSubmitting ?? this.isSubmitting,
-        isAcknowledgingNotification:
-            isAcknowledgingNotification ?? this.isAcknowledgingNotification,
-        acknowledgementErrorMessage:
-            identical(acknowledgementErrorMessage, _unset)
-            ? this.acknowledgementErrorMessage
-            : acknowledgementErrorMessage as String?,
+        isSubmitting: isSubmitting,
       ),
       DesktopSessionControllerStatus.error =>
         DesktopSessionControllerState.error(
           message!,
-          isSubmitting: isSubmitting ?? this.isSubmitting,
-          isAcknowledgingNotification:
-              isAcknowledgingNotification ?? this.isAcknowledgingNotification,
+          isSubmitting: isSubmitting,
         ),
     };
   }
 }
 
 class DesktopSessionController extends ChangeNotifier {
-  DesktopSessionController({DesktopSessionRuntime? runtime})
-    : _runtime = runtime ?? HostDesktopSessionRuntime() {
-    _stateSubscription = _runtime.states.listen(_handleRuntimeState);
+  DesktopSessionController({
+    DesktopSessionRuntime? runtime,
+    HostService? hostService,
+    SessionSnapshotStore? snapshotStore,
+  }) : _runtime =
+           runtime ??
+           HostDesktopSessionRuntime(
+             hostService: hostService,
+             snapshotStore: snapshotStore,
+           ) {
+    _runtime.bind(
+      onSnapshot: _handleRuntimeSnapshot,
+      onWatchError: _handleRuntimeWatchError,
+    );
   }
 
   static const attachedClientId = desktopSessionRuntimeAttachedClientId;
 
   final DesktopSessionRuntime _runtime;
-  late final StreamSubscription<CommonCodeSessionFacadeState>
-  _stateSubscription;
 
   DesktopSessionControllerState _state =
       const DesktopSessionControllerState.loading();
@@ -132,34 +111,6 @@ class DesktopSessionController extends ChangeNotifier {
   Future<void> refresh() async {
     _emitState(const DesktopSessionControllerState.loading());
     await _runtime.refresh();
-  }
-
-  Future<void> acknowledgeNotification({required String notificationId}) async {
-    _emitState(
-      _state.copyWith(
-        isAcknowledgingNotification: true,
-        acknowledgementErrorMessage: null,
-      ),
-    );
-
-    try {
-      await _runtime.acknowledgeNotification(notificationId: notificationId);
-    } catch (error) {
-      _emitState(
-        _state.copyWith(
-          isAcknowledgingNotification: false,
-          acknowledgementErrorMessage: error.toString(),
-        ),
-      );
-      rethrow;
-    }
-
-    _emitState(
-      _state.copyWith(
-        isAcknowledgingNotification: false,
-        acknowledgementErrorMessage: null,
-      ),
-    );
   }
 
   @protected
@@ -184,26 +135,25 @@ class DesktopSessionController extends ChangeNotifier {
     _emitState(_state.copyWithSubmitting(false));
   }
 
-  void _handleRuntimeState(CommonCodeSessionFacadeState state) {
-    _emitState(switch (state.status) {
-      CommonCodeSessionFacadeStatus.loading =>
-        DesktopSessionControllerState.loading(isSubmitting: state.isSubmitting),
-      CommonCodeSessionFacadeStatus.empty =>
-        DesktopSessionControllerState.empty(isSubmitting: state.isSubmitting),
-      CommonCodeSessionFacadeStatus.data => DesktopSessionControllerState.data(
+  void _handleRuntimeSnapshot(Session session) {
+    _emitState(
+      DesktopSessionControllerState.data(
         DesktopSessionSnapshot(
-          session: state.snapshot!.session,
-          attachedClientId: state.snapshot!.attachedClientId,
+          session: session,
+          attachedClientId: attachedClientId,
         ),
-        isSubmitting: state.isSubmitting,
-        isAcknowledgingNotification: _state.isAcknowledgingNotification,
+        isSubmitting: _state.isSubmitting,
       ),
-      CommonCodeSessionFacadeStatus.error =>
-        DesktopSessionControllerState.error(
-          state.message!,
-          isSubmitting: state.isSubmitting,
-        ),
-    });
+    );
+  }
+
+  void _handleRuntimeWatchError(Object error, StackTrace stackTrace) {
+    _emitState(
+      DesktopSessionControllerState.error(
+        error.toString(),
+        isSubmitting: false,
+      ),
+    );
   }
 
   void _emitState(DesktopSessionControllerState state) {
@@ -218,7 +168,6 @@ class DesktopSessionController extends ChangeNotifier {
   @override
   void dispose() {
     _isDisposed = true;
-    unawaited(_stateSubscription.cancel());
     unawaited(_runtime.dispose());
     super.dispose();
   }
