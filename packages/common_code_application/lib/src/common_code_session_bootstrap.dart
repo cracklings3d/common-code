@@ -68,80 +68,89 @@ final class CommonCodeLegacySeedLoadResult {
   final Session? session;
 }
 
-abstract interface class CommonCodeSessionBootstrapPort {
-  bool get isBootstrapped;
-
-  Session readBootstrappedSession();
-
-  Future<CommonCodeDurableBootstrapLoadResult> loadDurableSessionCandidate({
-    required String attachedClientId,
-  });
-
-  Session restoreDurableSession(Session session);
-
-  Future<CommonCodeLegacySeedLoadResult> loadLegacySeedSession({
-    required String attachedClientId,
-  });
-
-  Future<Session> restoreLegacySeededSession({
-    required Session session,
-    required String attachedClientId,
-  });
-
-  Future<Session> createFreshSession(CommonCodeSessionBootstrapRequest request);
-}
-
 final class CommonCodeSessionBootstrapOrchestrator {
   const CommonCodeSessionBootstrapOrchestrator();
 
   Future<Session> bootstrap({
-    required CommonCodeSessionBootstrapPort port,
     required CommonCodeSessionBootstrapRequest request,
+    required bool isBootstrapped,
+    required Session Function() readBootstrappedSession,
+    required Future<CommonCodeDurableBootstrapLoadResult> Function({
+      required String attachedClientId,
+    })
+    loadDurableSessionCandidate,
+    required Session Function(Session session) restoreDurableSession,
+    required Future<CommonCodeLegacySeedLoadResult> Function({
+      required String attachedClientId,
+    })
+    loadLegacySeedSession,
+    required Future<Session> Function({
+      required Session session,
+      required String attachedClientId,
+    })
+    restoreLegacySeededSession,
+    required Future<Session> Function(CommonCodeSessionBootstrapRequest request)
+    createFreshSession,
   }) async {
-    if (port.isBootstrapped) {
-      return port.readBootstrappedSession();
+    if (isBootstrapped) {
+      return readBootstrappedSession();
     }
 
-    final durableCandidate = await port.loadDurableSessionCandidate(
+    final durableCandidate = await loadDurableSessionCandidate(
       attachedClientId: request.attachedClientId,
     );
 
     switch (durableCandidate.status) {
       case CommonCodeDurableBootstrapLoadStatus.available:
         try {
-          return port.restoreDurableSession(durableCandidate.session!);
+          return restoreDurableSession(durableCandidate.session!);
         } catch (_) {
-          return port.createFreshSession(request);
+          return createFreshSession(request);
         }
       case CommonCodeDurableBootstrapLoadStatus.missing:
       case CommonCodeDurableBootstrapLoadStatus.invalid:
       case CommonCodeDurableBootstrapLoadStatus.readFailed:
-        return _bootstrapFromLegacySeedOrFresh(port: port, request: request);
+        return _bootstrapFromLegacySeedOrFresh(
+          request: request,
+          loadLegacySeedSession: loadLegacySeedSession,
+          restoreLegacySeededSession: restoreLegacySeededSession,
+          createFreshSession: createFreshSession,
+        );
     }
   }
 
   Future<Session> _bootstrapFromLegacySeedOrFresh({
-    required CommonCodeSessionBootstrapPort port,
     required CommonCodeSessionBootstrapRequest request,
+    required Future<CommonCodeLegacySeedLoadResult> Function({
+      required String attachedClientId,
+    })
+    loadLegacySeedSession,
+    required Future<Session> Function({
+      required Session session,
+      required String attachedClientId,
+    })
+    restoreLegacySeededSession,
+    required Future<Session> Function(CommonCodeSessionBootstrapRequest request)
+    createFreshSession,
   }) async {
-    final legacySeed = await port.loadLegacySeedSession(
+    final legacySeed = await loadLegacySeedSession(
       attachedClientId: request.attachedClientId,
     );
 
     switch (legacySeed.status) {
       case CommonCodeLegacySeedLoadStatus.available:
         try {
-          return await port.restoreLegacySeededSession(
+          return await restoreLegacySeededSession(
             session: legacySeed.session!,
             attachedClientId: request.attachedClientId,
           );
         } catch (_) {
-          return port.createFreshSession(request);
+          return createFreshSession(request);
         }
       case CommonCodeLegacySeedLoadStatus.disabled:
       case CommonCodeLegacySeedLoadStatus.missing:
       case CommonCodeLegacySeedLoadStatus.failed:
-        return port.createFreshSession(request);
+        return createFreshSession(request);
     }
   }
 }

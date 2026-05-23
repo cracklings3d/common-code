@@ -1,7 +1,9 @@
+// ignore_for_file: implementation_imports
+
 import 'dart:async';
 import 'dart:convert';
 
-import 'package:common_code_application/common_code_application.dart';
+import 'package:common_code_application/src/common_code_session_bootstrap.dart';
 import 'package:common_code_domain/common_code_domain.dart';
 import 'package:host_core/host_core.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -105,8 +107,7 @@ final class SharedPreferencesDurableLocalHostStorage
   }
 }
 
-class DurableLocalHostService
-    implements HostService, CommonCodeSessionBootstrapPort {
+class DurableLocalHostService implements HostService {
   DurableLocalHostService({
     DesktopSessionSnapshotStore? legacySnapshotStore,
     DurableLocalHostStorage? durableStorage,
@@ -145,21 +146,25 @@ class DurableLocalHostService
     required String desktopClientId,
   }) async {
     return const CommonCodeSessionBootstrapOrchestrator().bootstrap(
-      port: this,
       request: CommonCodeSessionBootstrapRequest(
         defaultSessionId: defaultSessionId,
         hostId: hostId,
         attachedClientId: desktopClientId,
       ),
+      isBootstrapped: isBootstrapped,
+      readBootstrappedSession: readBootstrappedSession,
+      loadDurableSessionCandidate: loadDurableSessionCandidate,
+      restoreDurableSession: restoreDurableSession,
+      loadLegacySeedSession: loadLegacySeedSession,
+      restoreLegacySeededSession: restoreLegacySeededSession,
+      createFreshSession: createFreshSession,
     );
   }
 
   Future<void> flushPendingWrites() => _writeSequence;
 
-  @override
   bool get isBootstrapped => _isBootstrapped;
 
-  @override
   Future<Session> createFreshSession(
     CommonCodeSessionBootstrapRequest request,
   ) {
@@ -170,7 +175,6 @@ class DurableLocalHostService
     );
   }
 
-  @override
   Future<CommonCodeLegacySeedLoadResult> loadLegacySeedSession({
     required String attachedClientId,
   }) async {
@@ -220,7 +224,6 @@ class DurableLocalHostService
     }
   }
 
-  @override
   Future<CommonCodeDurableBootstrapLoadResult> loadDurableSessionCandidate({
     required String attachedClientId,
   }) async {
@@ -265,12 +268,10 @@ class DurableLocalHostService
     }
   }
 
-  @override
   Session readBootstrappedSession() {
     return readSession(_bootstrappedSessionId!);
   }
 
-  @override
   Future<Session> restoreLegacySeededSession({
     required Session session,
     required String attachedClientId,
@@ -317,7 +318,6 @@ class DurableLocalHostService
     }
   }
 
-  @override
   Session restoreDurableSession(Session session) {
     try {
       final restoredSession = restoreBootstrappedSession(session);

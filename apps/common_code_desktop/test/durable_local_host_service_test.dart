@@ -325,6 +325,48 @@ void main() {
       );
     });
 
+    test(
+      'bootstrap persist failure after legacy restore falls back fresh',
+      () async {
+        final diagnostics = <DurableLocalHostDiagnosticCode>[];
+        final storage = _MemoryDurableStorage(
+          writeError: StateError('write boom'),
+        );
+        final service = DurableLocalHostService(
+          durableStorage: storage,
+          legacySnapshotStore: _MemoryLegacySnapshotStore(
+            storedSession: _completedSession(),
+          ),
+          diagnosticsSink: (diagnostic) => diagnostics.add(diagnostic.code),
+        );
+
+        final session = await service.bootstrap(
+          defaultSessionId: desktopSessionRuntimeDefaultSessionId,
+          hostId: desktopSessionRuntimeHostId,
+          desktopClientId: desktopSessionRuntimeAttachedClientId,
+        );
+
+        expect(session.id, desktopSessionRuntimeDefaultSessionId);
+        expect(
+          session.clients.single.id,
+          desktopSessionRuntimeAttachedClientId,
+        );
+        expect(
+          diagnostics,
+          containsAllInOrder(<DurableLocalHostDiagnosticCode>[
+            DurableLocalHostDiagnosticCode.durableReadMissing,
+            DurableLocalHostDiagnosticCode.legacySeedActivated,
+            DurableLocalHostDiagnosticCode.legacySeedFailed,
+            DurableLocalHostDiagnosticCode.freshBootstrapActivated,
+          ]),
+        );
+        expect(
+          diagnostics,
+          isNot(contains(DurableLocalHostDiagnosticCode.legacySeedSucceeded)),
+        );
+      },
+    );
+
     test('durable restore failure activates fresh bootstrap only', () async {
       final diagnostics = <DurableLocalHostDiagnosticCode>[];
       final service = _RejectingRestoreDurableLocalHostService(
@@ -721,6 +763,7 @@ final class _MemoryDurableStorage implements DurableLocalHostStorage {
     this.legacySeedEnabled = true,
     this.readError,
     this.eligibilityError,
+    this.writeError,
   });
 
   String? payload;

@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:common_code_application/common_code_application.dart';
+import 'package:common_code_application/src/common_code_session_bootstrap.dart';
 import 'package:common_code_domain/common_code_domain.dart';
 import 'package:test/test.dart';
 
@@ -153,12 +154,18 @@ void main() {
 
       final session = await const CommonCodeSessionBootstrapOrchestrator()
           .bootstrap(
-            port: port,
             request: const CommonCodeSessionBootstrapRequest(
               defaultSessionId: 'desktop-session',
               hostId: 'desktop-host',
               attachedClientId: 'desktop-client',
             ),
+            isBootstrapped: port.isBootstrapped,
+            readBootstrappedSession: port.readBootstrappedSession,
+            loadDurableSessionCandidate: port.loadDurableSessionCandidate,
+            restoreDurableSession: port.restoreDurableSession,
+            loadLegacySeedSession: port.loadLegacySeedSession,
+            restoreLegacySeededSession: port.restoreLegacySeededSession,
+            createFreshSession: port.createFreshSession,
           );
 
       expect(session, same(existingSession));
@@ -179,12 +186,18 @@ void main() {
 
         final session = await const CommonCodeSessionBootstrapOrchestrator()
             .bootstrap(
-              port: port,
               request: const CommonCodeSessionBootstrapRequest(
                 defaultSessionId: 'desktop-session',
                 hostId: 'desktop-host',
                 attachedClientId: 'desktop-client',
               ),
+              isBootstrapped: port.isBootstrapped,
+              readBootstrappedSession: port.readBootstrappedSession,
+              loadDurableSessionCandidate: port.loadDurableSessionCandidate,
+              restoreDurableSession: port.restoreDurableSession,
+              loadLegacySeedSession: port.loadLegacySeedSession,
+              restoreLegacySeededSession: port.restoreLegacySeededSession,
+              createFreshSession: port.createFreshSession,
             );
 
         expect(session, same(legacySession));
@@ -208,12 +221,18 @@ void main() {
 
         final session = await const CommonCodeSessionBootstrapOrchestrator()
             .bootstrap(
-              port: port,
               request: const CommonCodeSessionBootstrapRequest(
                 defaultSessionId: 'desktop-session',
                 hostId: 'desktop-host',
                 attachedClientId: 'desktop-client',
               ),
+              isBootstrapped: port.isBootstrapped,
+              readBootstrappedSession: port.readBootstrappedSession,
+              loadDurableSessionCandidate: port.loadDurableSessionCandidate,
+              restoreDurableSession: port.restoreDurableSession,
+              loadLegacySeedSession: port.loadLegacySeedSession,
+              restoreLegacySeededSession: port.restoreLegacySeededSession,
+              createFreshSession: port.createFreshSession,
             );
 
         expect(session, same(freshSession));
@@ -236,12 +255,18 @@ void main() {
 
       final session = await const CommonCodeSessionBootstrapOrchestrator()
           .bootstrap(
-            port: port,
             request: const CommonCodeSessionBootstrapRequest(
               defaultSessionId: 'desktop-session',
               hostId: 'desktop-host',
               attachedClientId: 'desktop-client',
             ),
+            isBootstrapped: port.isBootstrapped,
+            readBootstrappedSession: port.readBootstrappedSession,
+            loadDurableSessionCandidate: port.loadDurableSessionCandidate,
+            restoreDurableSession: port.restoreDurableSession,
+            loadLegacySeedSession: port.loadLegacySeedSession,
+            restoreLegacySeededSession: port.restoreLegacySeededSession,
+            createFreshSession: port.createFreshSession,
           );
 
       expect(session, same(freshSession));
@@ -264,12 +289,18 @@ void main() {
 
         final session = await const CommonCodeSessionBootstrapOrchestrator()
             .bootstrap(
-              port: port,
               request: const CommonCodeSessionBootstrapRequest(
                 defaultSessionId: 'desktop-session',
                 hostId: 'desktop-host',
                 attachedClientId: 'desktop-client',
               ),
+              isBootstrapped: port.isBootstrapped,
+              readBootstrappedSession: port.readBootstrappedSession,
+              loadDurableSessionCandidate: port.loadDurableSessionCandidate,
+              restoreDurableSession: port.restoreDurableSession,
+              loadLegacySeedSession: port.loadLegacySeedSession,
+              restoreLegacySeededSession: port.restoreLegacySeededSession,
+              createFreshSession: port.createFreshSession,
             );
 
         expect(session, same(freshSession));
@@ -397,7 +428,7 @@ final class _FakeCommonCodeSessionDriver implements CommonCodeSessionDriver {
   }
 }
 
-final class _FakeBootstrapPort implements CommonCodeSessionBootstrapPort {
+final class _FakeBootstrapPort {
   _FakeBootstrapPort({
     this.isBootstrapped = false,
     Session? bootstrappedSession,
@@ -411,7 +442,6 @@ final class _FakeBootstrapPort implements CommonCodeSessionBootstrapPort {
        _freshSession = freshSession ?? _bootstrapSessionWithNotification(),
        _restoredLegacySession = restoredLegacySession ?? _bootstrapSession();
 
-  @override
   final bool isBootstrapped;
 
   final Session _bootstrappedSession;
@@ -428,7 +458,6 @@ final class _FakeBootstrapPort implements CommonCodeSessionBootstrapPort {
   int restoreDurableCalls = 0;
   int restoreLegacyCalls = 0;
 
-  @override
   Future<Session> createFreshSession(
     CommonCodeSessionBootstrapRequest request,
   ) async {
@@ -436,7 +465,6 @@ final class _FakeBootstrapPort implements CommonCodeSessionBootstrapPort {
     return _freshSession;
   }
 
-  @override
   Future<CommonCodeDurableBootstrapLoadResult> loadDurableSessionCandidate({
     required String attachedClientId,
   }) async {
@@ -444,7 +472,6 @@ final class _FakeBootstrapPort implements CommonCodeSessionBootstrapPort {
     return durableResult;
   }
 
-  @override
   Future<CommonCodeLegacySeedLoadResult> loadLegacySeedSession({
     required String attachedClientId,
   }) async {
@@ -452,10 +479,8 @@ final class _FakeBootstrapPort implements CommonCodeSessionBootstrapPort {
     return legacyResult;
   }
 
-  @override
   Session readBootstrappedSession() => _bootstrappedSession;
 
-  @override
   Session restoreDurableSession(Session session) {
     restoreDurableCalls += 1;
     if (restoreDurableError case final Object error) {
@@ -464,7 +489,6 @@ final class _FakeBootstrapPort implements CommonCodeSessionBootstrapPort {
     return session;
   }
 
-  @override
   Future<Session> restoreLegacySeededSession({
     required Session session,
     required String attachedClientId,
