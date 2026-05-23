@@ -161,7 +161,7 @@ void main() {
     );
 
     test(
-      'runtime emits read_failed diagnostics without consulting legacy seeding',
+      'runtime emits read_failed diagnostics before legacy seed fallback',
       () async {
         final diagnostics = <DurableLocalHostDiagnosticCode>[];
         final durableStorage = _MemoryDurableStorage(
@@ -185,21 +185,14 @@ void main() {
         await runtime.initialize();
 
         expect(snapshot, isNotNull);
-        expect(snapshot!.id, desktopSessionRuntimeDefaultSessionId);
+        expect(snapshot!.id, 'restored-session');
         expect(
           diagnostics,
           containsAllInOrder(<DurableLocalHostDiagnosticCode>[
             DurableLocalHostDiagnosticCode.durableReadFailed,
-            DurableLocalHostDiagnosticCode.freshBootstrapActivated,
+            DurableLocalHostDiagnosticCode.legacySeedActivated,
+            DurableLocalHostDiagnosticCode.legacySeedSucceeded,
           ]),
-        );
-        expect(
-          diagnostics,
-          isNot(contains(DurableLocalHostDiagnosticCode.legacySeedActivated)),
-        );
-        expect(
-          diagnostics,
-          isNot(contains(DurableLocalHostDiagnosticCode.legacySeedSkipped)),
         );
       },
     );

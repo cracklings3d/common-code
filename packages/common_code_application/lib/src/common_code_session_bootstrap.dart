@@ -1,61 +1,147 @@
 import 'package:common_code_domain/common_code_domain.dart';
 
-abstract interface class CommonCodeSessionStore {
-  Future<Session?> readLatestSession();
+final class CommonCodeSessionBootstrapRequest {
+  const CommonCodeSessionBootstrapRequest({
+    required this.defaultSessionId,
+    required this.hostId,
+    required this.attachedClientId,
+  });
 
-  Future<Session> restoreSession(Session session);
+  final String defaultSessionId;
+  final String hostId;
+  final String attachedClientId;
 }
 
-abstract interface class CommonCodeIdentityContext {
-  Future<Client> resolveAttachedClient({required String sessionId});
+enum CommonCodeDurableBootstrapLoadStatus {
+  available,
+  missing,
+  invalid,
+  readFailed,
 }
 
-final class CommonCodeSessionBootstrap {
-  CommonCodeSessionBootstrap({
-    required CommonCodeSessionStore sessionStore,
-    required CommonCodeIdentityContext identityContext,
-  }) : _sessionStore = sessionStore,
-       _identityContext = identityContext;
+final class CommonCodeDurableBootstrapLoadResult {
+  const CommonCodeDurableBootstrapLoadResult._({
+    required this.status,
+    this.session,
+  });
 
-  final CommonCodeSessionStore _sessionStore;
-  final CommonCodeIdentityContext _identityContext;
+  const CommonCodeDurableBootstrapLoadResult.available(Session session)
+    : this._(
+        status: CommonCodeDurableBootstrapLoadStatus.available,
+        session: session,
+      );
 
-  Future<Session> ensureSession({
-    required String defaultSessionId,
-    required String hostId,
+  const CommonCodeDurableBootstrapLoadResult.missing()
+    : this._(status: CommonCodeDurableBootstrapLoadStatus.missing);
+
+  const CommonCodeDurableBootstrapLoadResult.invalid()
+    : this._(status: CommonCodeDurableBootstrapLoadStatus.invalid);
+
+  const CommonCodeDurableBootstrapLoadResult.readFailed()
+    : this._(status: CommonCodeDurableBootstrapLoadStatus.readFailed);
+
+  final CommonCodeDurableBootstrapLoadStatus status;
+  final Session? session;
+}
+
+enum CommonCodeLegacySeedLoadStatus { available, disabled, missing, failed }
+
+final class CommonCodeLegacySeedLoadResult {
+  const CommonCodeLegacySeedLoadResult._({required this.status, this.session});
+
+  const CommonCodeLegacySeedLoadResult.available(Session session)
+    : this._(
+        status: CommonCodeLegacySeedLoadStatus.available,
+        session: session,
+      );
+
+  const CommonCodeLegacySeedLoadResult.disabled()
+    : this._(status: CommonCodeLegacySeedLoadStatus.disabled);
+
+  const CommonCodeLegacySeedLoadResult.missing()
+    : this._(status: CommonCodeLegacySeedLoadStatus.missing);
+
+  const CommonCodeLegacySeedLoadResult.failed()
+    : this._(status: CommonCodeLegacySeedLoadStatus.failed);
+
+  final CommonCodeLegacySeedLoadStatus status;
+  final Session? session;
+}
+
+abstract interface class CommonCodeSessionBootstrapPort {
+  bool get isBootstrapped;
+
+  Session readBootstrappedSession();
+
+  Future<CommonCodeDurableBootstrapLoadResult> loadDurableSessionCandidate({
+    required String attachedClientId,
+  });
+
+  Session restoreDurableSession(Session session);
+
+  Future<CommonCodeLegacySeedLoadResult> loadLegacySeedSession({
+    required String attachedClientId,
+  });
+
+  Future<Session> restoreLegacySeededSession({
+    required Session session,
+    required String attachedClientId,
+  });
+
+  Future<Session> createFreshSession(CommonCodeSessionBootstrapRequest request);
+}
+
+final class CommonCodeSessionBootstrapOrchestrator {
+  const CommonCodeSessionBootstrapOrchestrator();
+
+  Future<Session> bootstrap({
+    required CommonCodeSessionBootstrapPort port,
+    required CommonCodeSessionBootstrapRequest request,
   }) async {
-    final restoredSession = await _sessionStore.readLatestSession();
-    if (restoredSession != null) {
-      try {
-        return await _persistSessionWithAttachedClient(restoredSession);
-      } catch (_) {
-        // Fall back to the bounded fresh-session path.
-      }
+    if (port.isBootstrapped) {
+      return port.readBootstrappedSession();
     }
 
-    final freshSession = Session(
-      id: defaultSessionId,
-      activeHost: Host(id: hostId),
+    final durableCandidate = await port.loadDurableSessionCandidate(
+      attachedClientId: request.attachedClientId,
     );
-    return _persistSessionWithAttachedClient(freshSession);
-  }
 
-  Future<Session> _persistSessionWithAttachedClient(Session session) async {
-    final attachedClient = await _identityContext.resolveAttachedClient(
-      sessionId: session.id,
-    );
-    return _sessionStore.restoreSession(
-      _attachClientIfMissing(session, attachedClient),
-    );
-  }
-
-  Session _attachClientIfMissing(Session session, Client attachedClient) {
-    for (final client in session.clients) {
-      if (client.id == attachedClient.id) {
-        return session;
-      }
+    switch (durableCandidate.status) {
+      case CommonCodeDurableBootstrapLoadStatus.available:
+        try {
+          return port.restoreDurableSession(durableCandidate.session!);
+        } catch (_) {
+          return port.createFreshSession(request);
+        }
+      case CommonCodeDurableBootstrapLoadStatus.missing:
+      case CommonCodeDurableBootstrapLoadStatus.invalid:
+      case CommonCodeDurableBootstrapLoadStatus.readFailed:
+        return _bootstrapFromLegacySeedOrFresh(port: port, request: request);
     }
+  }
 
-    return session.attachClient(attachedClient);
+  Future<Session> _bootstrapFromLegacySeedOrFresh({
+    required CommonCodeSessionBootstrapPort port,
+    required CommonCodeSessionBootstrapRequest request,
+  }) async {
+    final legacySeed = await port.loadLegacySeedSession(
+      attachedClientId: request.attachedClientId,
+    );
+
+    switch (legacySeed.status) {
+      case CommonCodeLegacySeedLoadStatus.available:
+        try {
+          return await port.restoreLegacySeededSession(
+            session: legacySeed.session!,
+            attachedClientId: request.attachedClientId,
+          );
+        } catch (_) {
+          return port.createFreshSession(request);
+        }
+      case CommonCodeLegacySeedLoadStatus.disabled:
+      case CommonCodeLegacySeedLoadStatus.missing:
+      case CommonCodeLegacySeedLoadStatus.failed:
+        return port.createFreshSession(request);
+    }
   }
 }
