@@ -42,6 +42,30 @@ void main() {
       );
     });
 
+    test('already bootstrapped re-entry returns current session', () async {
+      final service = DurableLocalHostService(
+        durableStorage: _MemoryDurableStorage(),
+        legacySnapshotStore: _MemoryLegacySnapshotStore(
+          storedSession: _completedSession(),
+        ),
+      );
+
+      final seededSession = await service.bootstrap(
+        defaultSessionId: desktopSessionRuntimeDefaultSessionId,
+        hostId: desktopSessionRuntimeHostId,
+        desktopClientId: desktopSessionRuntimeAttachedClientId,
+      );
+
+      final nextSession = await service.bootstrap(
+        defaultSessionId: 'other-session',
+        hostId: 'other-host',
+        desktopClientId: 'other-client',
+      );
+
+      expect(nextSession.id, seededSession.id);
+      expectSessionLike(nextSession, seededSession);
+    });
+
     test(
       'missing durable state falls back fresh when legacy seeding is ineligible',
       () async {
@@ -272,7 +296,7 @@ void main() {
       },
     );
 
-    test('read failure activates fresh bootstrap only', () async {
+    test('read failure falls through to legacy seed when eligible', () async {
       final diagnostics = <DurableLocalHostDiagnosticCode>[];
       final service = DurableLocalHostService(
         durableStorage: _MemoryDurableStorage(
@@ -290,18 +314,14 @@ void main() {
         desktopClientId: desktopSessionRuntimeAttachedClientId,
       );
 
-      expect(session.id, desktopSessionRuntimeDefaultSessionId);
+      expectSessionLike(session, _completedSession());
       expect(
         diagnostics,
-        contains(DurableLocalHostDiagnosticCode.durableReadFailed),
-      );
-      expect(
-        diagnostics,
-        contains(DurableLocalHostDiagnosticCode.freshBootstrapActivated),
-      );
-      expect(
-        diagnostics,
-        isNot(contains(DurableLocalHostDiagnosticCode.legacySeedActivated)),
+        containsAllInOrder(<DurableLocalHostDiagnosticCode>[
+          DurableLocalHostDiagnosticCode.durableReadFailed,
+          DurableLocalHostDiagnosticCode.legacySeedActivated,
+          DurableLocalHostDiagnosticCode.legacySeedSucceeded,
+        ]),
       );
     });
 
@@ -476,46 +496,51 @@ void main() {
       expect(turnOnlySession.notifications, isEmpty);
     });
 
-    test('live acknowledgement updates durable session notification state', () async {
-      final service = DurableLocalHostService(
-        durableStorage: _MemoryDurableStorage(
-          payload: jsonEncode(
-            const DesktopSessionSnapshotJsonCodec().encode(
-              _runningSessionWithNotifications(),
+    test(
+      'live acknowledgement updates durable session notification state',
+      () async {
+        final service = DurableLocalHostService(
+          durableStorage: _MemoryDurableStorage(
+            payload: jsonEncode(
+              const DesktopSessionSnapshotJsonCodec().encode(
+                _runningSessionWithNotifications(),
+              ),
             ),
           ),
-        ),
-        legacySnapshotStore: _MemoryLegacySnapshotStore(),
-      );
+          legacySnapshotStore: _MemoryLegacySnapshotStore(),
+        );
 
-      final session = await service.bootstrap(
-        defaultSessionId: desktopSessionRuntimeDefaultSessionId,
-        hostId: desktopSessionRuntimeHostId,
-        desktopClientId: desktopSessionRuntimeAttachedClientId,
-      );
-      final notificationId = session.notifications.firstWhere(
-        (notification) => !notification.isAcknowledged,
-      ).id;
+        final session = await service.bootstrap(
+          defaultSessionId: desktopSessionRuntimeDefaultSessionId,
+          hostId: desktopSessionRuntimeHostId,
+          desktopClientId: desktopSessionRuntimeAttachedClientId,
+        );
+        final notificationId = session.notifications
+            .firstWhere((notification) => !notification.isAcknowledged)
+            .id;
 
-      final acknowledgedSession = service.acknowledgeNotification(
-        sessionId: session.id,
-        notificationId: notificationId,
-      );
-      await service.flushPendingWrites();
+        final acknowledgedSession = service.acknowledgeNotification(
+          sessionId: session.id,
+          notificationId: notificationId,
+        );
+        await service.flushPendingWrites();
 
-      expect(
-        acknowledgedSession.notifications.firstWhere(
-          (notification) => notification.id == notificationId,
-        ).isAcknowledged,
-        isTrue,
-      );
-      expect(
-        service.readSession(session.id).notifications.firstWhere(
-          (notification) => notification.id == notificationId,
-        ).isAcknowledged,
-        isTrue,
-      );
-    });
+        expect(
+          acknowledgedSession.notifications
+              .firstWhere((notification) => notification.id == notificationId)
+              .isAcknowledged,
+          isTrue,
+        );
+        expect(
+          service
+              .readSession(session.id)
+              .notifications
+              .firstWhere((notification) => notification.id == notificationId)
+              .isAcknowledged,
+          isTrue,
+        );
+      },
+    );
 
     test(
       'first successful durable write disables later legacy seeding',

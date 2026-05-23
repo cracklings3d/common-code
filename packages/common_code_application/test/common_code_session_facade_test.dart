@@ -142,6 +142,143 @@ void main() {
       await facade.dispose();
     });
   });
+
+  group('CommonCodeSessionBootstrapOrchestrator', () {
+    test('returns current session when port is already bootstrapped', () async {
+      final existingSession = _bootstrapSession();
+      final port = _FakeBootstrapPort(
+        isBootstrapped: true,
+        bootstrappedSession: existingSession,
+      );
+
+      final session = await const CommonCodeSessionBootstrapOrchestrator()
+          .bootstrap(
+            port: port,
+            request: const CommonCodeSessionBootstrapRequest(
+              defaultSessionId: 'desktop-session',
+              hostId: 'desktop-host',
+              attachedClientId: 'desktop-client',
+            ),
+          );
+
+      expect(session, same(existingSession));
+      expect(port.loadDurableCalls, 0);
+      expect(port.loadLegacyCalls, 0);
+      expect(port.createFreshCalls, 0);
+    });
+
+    test(
+      'durable missing falls through to successful legacy seed restore',
+      () async {
+        final legacySession = _bootstrapSession();
+        final port = _FakeBootstrapPort(
+          durableResult: const CommonCodeDurableBootstrapLoadResult.missing(),
+          legacyResult: CommonCodeLegacySeedLoadResult.available(legacySession),
+          restoredLegacySession: legacySession,
+        );
+
+        final session = await const CommonCodeSessionBootstrapOrchestrator()
+            .bootstrap(
+              port: port,
+              request: const CommonCodeSessionBootstrapRequest(
+                defaultSessionId: 'desktop-session',
+                hostId: 'desktop-host',
+                attachedClientId: 'desktop-client',
+              ),
+            );
+
+        expect(session, same(legacySession));
+        expect(port.loadDurableCalls, 1);
+        expect(port.loadLegacyCalls, 1);
+        expect(port.restoreLegacyCalls, 1);
+        expect(port.createFreshCalls, 0);
+      },
+    );
+
+    test(
+      'durable read failure still consults legacy seed before fresh fallback',
+      () async {
+        final freshSession = _bootstrapSession();
+        final port = _FakeBootstrapPort(
+          durableResult:
+              const CommonCodeDurableBootstrapLoadResult.readFailed(),
+          legacyResult: const CommonCodeLegacySeedLoadResult.failed(),
+          freshSession: freshSession,
+        );
+
+        final session = await const CommonCodeSessionBootstrapOrchestrator()
+            .bootstrap(
+              port: port,
+              request: const CommonCodeSessionBootstrapRequest(
+                defaultSessionId: 'desktop-session',
+                hostId: 'desktop-host',
+                attachedClientId: 'desktop-client',
+              ),
+            );
+
+        expect(session, same(freshSession));
+        expect(port.loadDurableCalls, 1);
+        expect(port.loadLegacyCalls, 1);
+        expect(port.createFreshCalls, 1);
+      },
+    );
+
+    test('legacy restore failure falls back to fresh bootstrap', () async {
+      final freshSession = _bootstrapSession();
+      final port = _FakeBootstrapPort(
+        durableResult: const CommonCodeDurableBootstrapLoadResult.invalid(),
+        legacyResult: CommonCodeLegacySeedLoadResult.available(
+          _bootstrapSession(),
+        ),
+        restoreLegacyError: StateError('legacy restore failed'),
+        freshSession: freshSession,
+      );
+
+      final session = await const CommonCodeSessionBootstrapOrchestrator()
+          .bootstrap(
+            port: port,
+            request: const CommonCodeSessionBootstrapRequest(
+              defaultSessionId: 'desktop-session',
+              hostId: 'desktop-host',
+              attachedClientId: 'desktop-client',
+            ),
+          );
+
+      expect(session, same(freshSession));
+      expect(port.restoreLegacyCalls, 1);
+      expect(port.createFreshCalls, 1);
+    });
+
+    test(
+      'durable restore failure falls back directly to fresh bootstrap',
+      () async {
+        final durableSession = _bootstrapSession();
+        final freshSession = _bootstrapSessionWithNotification();
+        final port = _FakeBootstrapPort(
+          durableResult: CommonCodeDurableBootstrapLoadResult.available(
+            durableSession,
+          ),
+          restoreDurableError: StateError('durable restore failed'),
+          freshSession: freshSession,
+        );
+
+        final session = await const CommonCodeSessionBootstrapOrchestrator()
+            .bootstrap(
+              port: port,
+              request: const CommonCodeSessionBootstrapRequest(
+                defaultSessionId: 'desktop-session',
+                hostId: 'desktop-host',
+                attachedClientId: 'desktop-client',
+              ),
+            );
+
+        expect(session, same(freshSession));
+        expect(port.restoreDurableCalls, 1);
+        expect(port.loadLegacyCalls, 0);
+        expect(port.createFreshCalls, 1);
+      },
+    );
+  });
 }
 
 Session _bootstrapSession() {
@@ -257,5 +394,85 @@ final class _FakeCommonCodeSessionDriver implements CommonCodeSessionDriver {
     );
     _controllers.add(controller);
     return controller.stream;
+  }
+}
+
+final class _FakeBootstrapPort implements CommonCodeSessionBootstrapPort {
+  _FakeBootstrapPort({
+    this.isBootstrapped = false,
+    Session? bootstrappedSession,
+    this.durableResult = const CommonCodeDurableBootstrapLoadResult.missing(),
+    this.legacyResult = const CommonCodeLegacySeedLoadResult.disabled(),
+    Session? freshSession,
+    this.restoreDurableError,
+    this.restoreLegacyError,
+    Session? restoredLegacySession,
+  }) : _bootstrappedSession = bootstrappedSession ?? _bootstrapSession(),
+       _freshSession = freshSession ?? _bootstrapSessionWithNotification(),
+       _restoredLegacySession = restoredLegacySession ?? _bootstrapSession();
+
+  @override
+  final bool isBootstrapped;
+
+  final Session _bootstrappedSession;
+  final Session _freshSession;
+  final Session _restoredLegacySession;
+  final CommonCodeDurableBootstrapLoadResult durableResult;
+  final CommonCodeLegacySeedLoadResult legacyResult;
+  final Object? restoreDurableError;
+  final Object? restoreLegacyError;
+
+  int createFreshCalls = 0;
+  int loadDurableCalls = 0;
+  int loadLegacyCalls = 0;
+  int restoreDurableCalls = 0;
+  int restoreLegacyCalls = 0;
+
+  @override
+  Future<Session> createFreshSession(
+    CommonCodeSessionBootstrapRequest request,
+  ) async {
+    createFreshCalls += 1;
+    return _freshSession;
+  }
+
+  @override
+  Future<CommonCodeDurableBootstrapLoadResult> loadDurableSessionCandidate({
+    required String attachedClientId,
+  }) async {
+    loadDurableCalls += 1;
+    return durableResult;
+  }
+
+  @override
+  Future<CommonCodeLegacySeedLoadResult> loadLegacySeedSession({
+    required String attachedClientId,
+  }) async {
+    loadLegacyCalls += 1;
+    return legacyResult;
+  }
+
+  @override
+  Session readBootstrappedSession() => _bootstrappedSession;
+
+  @override
+  Session restoreDurableSession(Session session) {
+    restoreDurableCalls += 1;
+    if (restoreDurableError case final Object error) {
+      throw error;
+    }
+    return session;
+  }
+
+  @override
+  Future<Session> restoreLegacySeededSession({
+    required Session session,
+    required String attachedClientId,
+  }) async {
+    restoreLegacyCalls += 1;
+    if (restoreLegacyError case final Object error) {
+      throw error;
+    }
+    return _restoredLegacySession;
   }
 }

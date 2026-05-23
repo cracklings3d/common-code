@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 
+import 'package:common_code_application/common_code_application.dart';
 import 'package:common_code_domain/common_code_domain.dart';
 import 'package:host_core/host_core.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -104,7 +105,8 @@ final class SharedPreferencesDurableLocalHostStorage
   }
 }
 
-class DurableLocalHostService implements HostService {
+class DurableLocalHostService
+    implements HostService, CommonCodeSessionBootstrapPort {
   DurableLocalHostService({
     DesktopSessionSnapshotStore? legacySnapshotStore,
     DurableLocalHostStorage? durableStorage,
@@ -142,10 +144,87 @@ class DurableLocalHostService implements HostService {
     required String hostId,
     required String desktopClientId,
   }) async {
-    _desktopClientIdForDurableWrites = desktopClientId;
-    if (_isBootstrapped) {
-      return readSession(_bootstrappedSessionId!);
+    return const CommonCodeSessionBootstrapOrchestrator().bootstrap(
+      port: this,
+      request: CommonCodeSessionBootstrapRequest(
+        defaultSessionId: defaultSessionId,
+        hostId: hostId,
+        attachedClientId: desktopClientId,
+      ),
+    );
+  }
+
+  Future<void> flushPendingWrites() => _writeSequence;
+
+  @override
+  bool get isBootstrapped => _isBootstrapped;
+
+  @override
+  Future<Session> createFreshSession(
+    CommonCodeSessionBootstrapRequest request,
+  ) {
+    return _createFreshSession(
+      defaultSessionId: request.defaultSessionId,
+      hostId: request.hostId,
+      desktopClientId: request.attachedClientId,
+    );
+  }
+
+  @override
+  Future<CommonCodeLegacySeedLoadResult> loadLegacySeedSession({
+    required String attachedClientId,
+  }) async {
+    _desktopClientIdForDurableWrites = attachedClientId;
+
+    try {
+      final isLegacySeedEnabled = await _durableStorage.isLegacySeedEnabled(
+        desktopClientId: attachedClientId,
+      );
+      if (!isLegacySeedEnabled) {
+        _emit(
+          const DurableLocalHostDiagnostic(
+            DurableLocalHostDiagnosticCode.legacySeedSkipped,
+          ),
+        );
+        return const CommonCodeLegacySeedLoadResult.disabled();
+      }
+
+      _emit(
+        const DurableLocalHostDiagnostic(
+          DurableLocalHostDiagnosticCode.legacySeedActivated,
+        ),
+      );
+
+      final legacySession = await _legacySnapshotStore.readLatestSession(
+        desktopClientId: attachedClientId,
+      );
+      if (legacySession == null) {
+        _emit(
+          const DurableLocalHostDiagnostic(
+            DurableLocalHostDiagnosticCode.legacySeedFailed,
+          ),
+        );
+        return const CommonCodeLegacySeedLoadResult.missing();
+      }
+
+      return CommonCodeLegacySeedLoadResult.available(legacySession);
+    } catch (error, stackTrace) {
+      _emit(
+        DurableLocalHostDiagnostic(
+          DurableLocalHostDiagnosticCode.legacySeedFailed,
+          error: error,
+          stackTrace: stackTrace,
+        ),
+      );
+      return const CommonCodeLegacySeedLoadResult.failed();
     }
+  }
+
+  @override
+  Future<CommonCodeDurableBootstrapLoadResult> loadDurableSessionCandidate({
+    required String attachedClientId,
+  }) async {
+    _desktopClientIdForDurableWrites = attachedClientId;
 
     try {
       final encodedDurableSession = await _durableStorage.readSessionPayload();
@@ -155,16 +234,12 @@ class DurableLocalHostService implements HostService {
             DurableLocalHostDiagnosticCode.durableReadMissing,
           ),
         );
-        return _seedOrCreateFresh(
-          defaultSessionId: defaultSessionId,
-          hostId: hostId,
-          desktopClientId: desktopClientId,
-        );
+        return const CommonCodeDurableBootstrapLoadResult.missing();
       }
 
       final decodedDurableSession = _decodeDurableSession(
         encodedDurableSession,
-        desktopClientId: desktopClientId,
+        desktopClientId: attachedClientId,
       );
       if (decodedDurableSession == null) {
         _emit(
@@ -172,39 +247,12 @@ class DurableLocalHostService implements HostService {
             DurableLocalHostDiagnosticCode.durableReadCorruptOrInvalid,
           ),
         );
-        return _seedOrCreateFresh(
-          defaultSessionId: defaultSessionId,
-          hostId: hostId,
-          desktopClientId: desktopClientId,
-        );
+        return const CommonCodeDurableBootstrapLoadResult.invalid();
       }
 
-      try {
-        final restoredSession = restoreBootstrappedSession(
-          decodedDurableSession,
-        );
-        _bootstrappedSessionId = restoredSession.id;
-        _isBootstrapped = true;
-        _emit(
-          const DurableLocalHostDiagnostic(
-            DurableLocalHostDiagnosticCode.durableReadRestored,
-          ),
-        );
-        return restoredSession;
-      } catch (error, stackTrace) {
-        _emit(
-          DurableLocalHostDiagnostic(
-            DurableLocalHostDiagnosticCode.durableRestoreFailed,
-            error: error,
-            stackTrace: stackTrace,
-          ),
-        );
-        return _createFreshSession(
-          defaultSessionId: defaultSessionId,
-          hostId: hostId,
-          desktopClientId: desktopClientId,
-        );
-      }
+      return CommonCodeDurableBootstrapLoadResult.available(
+        decodedDurableSession,
+      );
     } catch (error, stackTrace) {
       _emit(
         DurableLocalHostDiagnostic(
@@ -213,15 +261,85 @@ class DurableLocalHostService implements HostService {
           stackTrace: stackTrace,
         ),
       );
-      return _createFreshSession(
-        defaultSessionId: defaultSessionId,
-        hostId: hostId,
-        desktopClientId: desktopClientId,
-      );
+      return const CommonCodeDurableBootstrapLoadResult.readFailed();
     }
   }
 
-  Future<void> flushPendingWrites() => _writeSequence;
+  @override
+  Session readBootstrappedSession() {
+    return readSession(_bootstrappedSessionId!);
+  }
+
+  @override
+  Future<Session> restoreLegacySeededSession({
+    required Session session,
+    required String attachedClientId,
+  }) async {
+    _desktopClientIdForDurableWrites = attachedClientId;
+    var emittedLegacySeedFailure = false;
+
+    try {
+      final restoredSession = _restoreSession(session: session);
+      try {
+        await _persistBootstrapSession(restoredSession);
+      } catch (error, stackTrace) {
+        _sessionsById.remove(restoredSession.id);
+        _emit(
+          DurableLocalHostDiagnostic(
+            DurableLocalHostDiagnosticCode.legacySeedFailed,
+            error: error,
+            stackTrace: stackTrace,
+          ),
+        );
+        emittedLegacySeedFailure = true;
+        rethrow;
+      }
+
+      _bootstrappedSessionId = restoredSession.id;
+      _isBootstrapped = true;
+      _emit(
+        const DurableLocalHostDiagnostic(
+          DurableLocalHostDiagnosticCode.legacySeedSucceeded,
+        ),
+      );
+      return restoredSession;
+    } catch (error, stackTrace) {
+      if (!emittedLegacySeedFailure) {
+        _emit(
+          DurableLocalHostDiagnostic(
+            DurableLocalHostDiagnosticCode.legacySeedFailed,
+            error: error,
+            stackTrace: stackTrace,
+          ),
+        );
+      }
+      rethrow;
+    }
+  }
+
+  @override
+  Session restoreDurableSession(Session session) {
+    try {
+      final restoredSession = restoreBootstrappedSession(session);
+      _bootstrappedSessionId = restoredSession.id;
+      _isBootstrapped = true;
+      _emit(
+        const DurableLocalHostDiagnostic(
+          DurableLocalHostDiagnosticCode.durableReadRestored,
+        ),
+      );
+      return restoredSession;
+    } catch (error, stackTrace) {
+      _emit(
+        DurableLocalHostDiagnostic(
+          DurableLocalHostDiagnosticCode.durableRestoreFailed,
+          error: error,
+          stackTrace: stackTrace,
+        ),
+      );
+      rethrow;
+    }
+  }
 
   @override
   Session attachClient({required String sessionId, required Client client}) {
@@ -439,109 +557,6 @@ class DurableLocalHostService implements HostService {
 
   Session restoreBootstrappedSession(Session session) {
     return _restoreSession(session: session);
-  }
-
-  Future<Session> _seedOrCreateFresh({
-    required String defaultSessionId,
-    required String hostId,
-    required String desktopClientId,
-  }) async {
-    try {
-      final isLegacySeedEnabled = await _durableStorage.isLegacySeedEnabled(
-        desktopClientId: desktopClientId,
-      );
-      if (!isLegacySeedEnabled) {
-        _emit(
-          const DurableLocalHostDiagnostic(
-            DurableLocalHostDiagnosticCode.legacySeedSkipped,
-          ),
-        );
-        return _createFreshSession(
-          defaultSessionId: defaultSessionId,
-          hostId: hostId,
-          desktopClientId: desktopClientId,
-        );
-      }
-
-      _emit(
-        const DurableLocalHostDiagnostic(
-          DurableLocalHostDiagnosticCode.legacySeedActivated,
-        ),
-      );
-
-      final legacySession = await _legacySnapshotStore.readLatestSession(
-        desktopClientId: desktopClientId,
-      );
-      if (legacySession == null) {
-        return _emitLegacySeedFailureAndCreateFresh(
-          defaultSessionId: defaultSessionId,
-          hostId: hostId,
-          desktopClientId: desktopClientId,
-        );
-      }
-
-      try {
-        final restoredSession = _restoreSession(session: legacySession);
-        try {
-          await _persistBootstrapSession(restoredSession);
-        } catch (error, stackTrace) {
-          _sessionsById.remove(restoredSession.id);
-          return _emitLegacySeedFailureAndCreateFresh(
-            defaultSessionId: defaultSessionId,
-            hostId: hostId,
-            desktopClientId: desktopClientId,
-            error: error,
-            stackTrace: stackTrace,
-          );
-        }
-
-        _bootstrappedSessionId = restoredSession.id;
-        _isBootstrapped = true;
-        _emit(
-          const DurableLocalHostDiagnostic(
-            DurableLocalHostDiagnosticCode.legacySeedSucceeded,
-          ),
-        );
-        return restoredSession;
-      } catch (error, stackTrace) {
-        return _emitLegacySeedFailureAndCreateFresh(
-          defaultSessionId: defaultSessionId,
-          hostId: hostId,
-          desktopClientId: desktopClientId,
-          error: error,
-          stackTrace: stackTrace,
-        );
-      }
-    } catch (error, stackTrace) {
-      return _emitLegacySeedFailureAndCreateFresh(
-        defaultSessionId: defaultSessionId,
-        hostId: hostId,
-        desktopClientId: desktopClientId,
-        error: error,
-        stackTrace: stackTrace,
-      );
-    }
-  }
-
-  Future<Session> _emitLegacySeedFailureAndCreateFresh({
-    required String defaultSessionId,
-    required String hostId,
-    required String desktopClientId,
-    Object? error,
-    StackTrace? stackTrace,
-  }) {
-    _emit(
-      DurableLocalHostDiagnostic(
-        DurableLocalHostDiagnosticCode.legacySeedFailed,
-        error: error,
-        stackTrace: stackTrace,
-      ),
-    );
-    return _createFreshSession(
-      defaultSessionId: defaultSessionId,
-      hostId: hostId,
-      desktopClientId: desktopClientId,
-    );
   }
 
   void _scheduleSimulatedExecution({
