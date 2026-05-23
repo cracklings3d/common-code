@@ -11,6 +11,7 @@ import 'durable_local_host_service.dart';
 
 CommonCodeSessionFacade createDesktopSessionFacade({
   CommonCodeSessionDriver? driver,
+  CommonCodeSessionObservation? observation,
   String attachedClientId = desktopSessionRuntimeAttachedClientId,
   Object? hostService,
   Object? snapshotStore,
@@ -20,26 +21,30 @@ CommonCodeSessionFacade createDesktopSessionFacade({
   String defaultSessionId = desktopSessionRuntimeDefaultSessionId,
   String hostId = desktopSessionRuntimeHostId,
 }) {
+  final effectiveDriver =
+      driver ??
+      HostCoreDesktopSessionDriver(
+        hostService: hostService as HostService?,
+        snapshotStore: snapshotStore as DesktopSessionSnapshotStore?,
+        durableStorage: durableStorage as DurableLocalHostStorage?,
+        hostServiceFactory: hostServiceFactory == null
+            ? null
+            : () => hostServiceFactory() as HostService,
+        diagnosticsSink: diagnosticsSink as DurableLocalHostDiagnosticsSink?,
+        defaultSessionId: defaultSessionId,
+        hostId: hostId,
+        attachedClientId: attachedClientId,
+      );
   return CommonCodeSessionFacade(
-    driver:
-        driver ??
-        HostCoreDesktopSessionDriver(
-          hostService: hostService as HostService?,
-          snapshotStore: snapshotStore as DesktopSessionSnapshotStore?,
-          durableStorage: durableStorage as DurableLocalHostStorage?,
-          hostServiceFactory: hostServiceFactory == null
-              ? null
-              : () => hostServiceFactory() as HostService,
-          diagnosticsSink: diagnosticsSink as DurableLocalHostDiagnosticsSink?,
-          defaultSessionId: defaultSessionId,
-          hostId: hostId,
-          attachedClientId: attachedClientId,
-        ),
+    driver: effectiveDriver,
+    observation:
+        observation ?? effectiveDriver as CommonCodeSessionObservation,
     attachedClientId: attachedClientId,
   );
 }
 
-final class HostCoreDesktopSessionDriver implements CommonCodeSessionDriver {
+final class HostCoreDesktopSessionDriver
+    implements CommonCodeSessionDriver, CommonCodeSessionObservation {
   HostCoreDesktopSessionDriver({
     HostService? hostService,
     DesktopSessionSnapshotStore? snapshotStore,
