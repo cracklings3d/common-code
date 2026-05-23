@@ -43,15 +43,15 @@ final class HostDesktopSessionRuntime implements DesktopSessionRuntime {
   }) : _facade =
            facade ??
            createDesktopSessionFacade(
-             hostService: hostService,
-             snapshotStore: snapshotStore,
-             durableStorage: durableStorage,
-             hostServiceFactory: hostServiceFactory,
-             diagnosticsSink: diagnosticsSink,
-             defaultSessionId: defaultSessionId,
-             hostId: hostId,
-             attachedClientId: attachedClientId,
-           );
+              hostService: hostService,
+              snapshotStore: snapshotStore,
+              durableStorage: durableStorage,
+              hostServiceFactory: hostServiceFactory,
+              diagnosticsSink: diagnosticsSink,
+              defaultSessionId: defaultSessionId,
+              hostId: hostId,
+              attachedClientId: attachedClientId,
+            );
 
   final CommonCodeSessionFacade _facade;
   StreamSubscription<CommonCodeSessionFacadeState>? _compatibilitySubscription;
