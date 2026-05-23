@@ -2,6 +2,8 @@ import 'dart:async';
 
 import 'package:common_code_domain/common_code_domain.dart';
 
+import 'common_code_session_observation.dart';
+
 final class CommonCodeSessionBinding {
   const CommonCodeSessionBinding.attached({required this.sessionId});
 
@@ -100,11 +102,14 @@ abstract interface class CommonCodeSessionDriver {
 final class CommonCodeSessionFacade {
   CommonCodeSessionFacade({
     required CommonCodeSessionDriver driver,
+    required CommonCodeSessionObservation observation,
     required String attachedClientId,
   }) : _driver = driver,
+       _observation = observation,
        _attachedClientId = attachedClientId;
 
   final CommonCodeSessionDriver _driver;
+  final CommonCodeSessionObservation _observation;
   final String _attachedClientId;
   final StreamController<CommonCodeSessionFacadeState> _states =
       StreamController<CommonCodeSessionFacadeState>.broadcast(sync: true);
@@ -243,7 +248,7 @@ final class CommonCodeSessionFacade {
         return;
       }
 
-      final watchStream = _driver.watchSession(sessionId);
+      final watchStream = _observation.watchSession(sessionId);
       _watchSubscription = watchStream.listen(
         (session) {
           if (_isStaleGeneration(generation)) {
