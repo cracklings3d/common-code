@@ -12,6 +12,7 @@ import 'durable_local_host_service.dart';
 CommonCodeSessionFacade createDesktopSessionFacade({
   CommonCodeSessionDriver? driver,
   CommonCodeSessionObservation? observation,
+  HostGateway? hostGateway,
   String attachedClientId = desktopSessionRuntimeAttachedClientId,
   Object? hostService,
   Object? snapshotStore,
@@ -35,10 +36,17 @@ CommonCodeSessionFacade createDesktopSessionFacade({
         hostId: hostId,
         attachedClientId: attachedClientId,
       );
+  final effectiveGateway = hostGateway ??
+      _HostCoreDesktopHostGateway(
+        serviceProvider: () =>
+            (effectiveDriver as HostCoreDesktopSessionDriver).sharedService,
+      );
+
   return CommonCodeSessionFacade(
     driver: effectiveDriver,
     observation:
         observation ?? effectiveDriver as CommonCodeSessionObservation,
+    hostGateway: effectiveGateway,
     attachedClientId: attachedClientId,
   );
 }
@@ -129,6 +137,9 @@ final class HostCoreDesktopSessionDriver
     return service.watchSession(sessionId);
   }
 
+  /// Returns the shared HostService instance used by this driver.
+  HostService get sharedService => _service ??= _hostService ?? _hostServiceFactory();
+
   Future<void> _bootstrapIfNeeded() async {
     final service = _service ??= _hostService ?? _hostServiceFactory();
     if (_isBootstrapped) {
@@ -179,5 +190,32 @@ final class HostCoreDesktopSessionDriver
     );
     _currentSessionId = _defaultSessionId;
     _isBootstrapped = true;
+  }
+}
+
+/// Host gateway adapter that delegates to HostService.submitTurn.
+///
+/// This is the desktop-specific implementation of [HostGateway] that
+/// wraps the transitional HostService boundary.
+final class _HostCoreDesktopHostGateway implements HostGateway {
+  _HostCoreDesktopHostGateway({
+    required HostService Function() serviceProvider,
+  }) : _serviceProvider = serviceProvider;
+
+  final HostService Function() _serviceProvider;
+
+  @override
+  Future<void> submitTurn({
+    required String sessionId,
+    required Client client,
+    required String submittedText,
+  }) async {
+    final service = _serviceProvider();
+
+    service.submitTurn(
+      sessionId: sessionId,
+      client: client,
+      submittedText: submittedText,
+    );
   }
 }
