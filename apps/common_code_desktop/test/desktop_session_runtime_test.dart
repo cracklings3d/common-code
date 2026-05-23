@@ -48,14 +48,16 @@ void main() {
       'runtime emits missing branch diagnostics when legacy seeding succeeds',
       () async {
         final diagnostics = <DurableLocalHostDiagnosticCode>[];
+        final durableStorage = _MemoryDurableStorage();
+        final snapshotStore = _MemoryLegacySnapshotStore(
+          storedSession: _completedSession(),
+        );
         final runtime = HostDesktopSessionRuntime(
-          hostServiceFactory: () => DurableLocalHostService(
-            durableStorage: _MemoryDurableStorage(),
-            legacySnapshotStore: _MemoryLegacySnapshotStore(
-              storedSession: _completedSession(),
-            ),
-            diagnosticsSink: (diagnostic) => diagnostics.add(diagnostic.code),
-          ),
+          hostServiceFactory: () =>
+              DurableLocalHostService(durableStorage: durableStorage),
+          snapshotStore: snapshotStore,
+          durableStorage: durableStorage,
+          diagnosticsSink: (diagnostic) => diagnostics.add(diagnostic.code),
         );
         Session? snapshot;
         runtime.bind(
@@ -88,14 +90,16 @@ void main() {
       'runtime emits missing branch diagnostics when legacy seeding is skipped',
       () async {
         final diagnostics = <DurableLocalHostDiagnosticCode>[];
+        final durableStorage = _MemoryDurableStorage();
+        final snapshotStore = _MemoryLegacySnapshotStore(
+          storedSession: _completedSession(),
+        );
         final runtime = HostDesktopSessionRuntime(
-          hostServiceFactory: () => DurableLocalHostService(
-            durableStorage: _MemoryDurableStorage(legacySeedEnabled: false),
-            legacySnapshotStore: _MemoryLegacySnapshotStore(
-              storedSession: _completedSession(),
-            ),
-            diagnosticsSink: (diagnostic) => diagnostics.add(diagnostic.code),
-          ),
+          hostServiceFactory: () =>
+              DurableLocalHostService(durableStorage: durableStorage),
+          snapshotStore: snapshotStore,
+          durableStorage: durableStorage..legacySeedEnabled = false,
+          diagnosticsSink: (diagnostic) => diagnostics.add(diagnostic.code),
         );
         Session? snapshot;
         runtime.bind(
@@ -126,12 +130,13 @@ void main() {
       'runtime emits corrupt branch diagnostics when legacy seeding fails',
       () async {
         final diagnostics = <DurableLocalHostDiagnosticCode>[];
+        final durableStorage = _MemoryDurableStorage(payload: '{bad-json');
         final runtime = HostDesktopSessionRuntime(
-          hostServiceFactory: () => DurableLocalHostService(
-            durableStorage: _MemoryDurableStorage(payload: '{bad-json'),
-            legacySnapshotStore: _MemoryLegacySnapshotStore(),
-            diagnosticsSink: (diagnostic) => diagnostics.add(diagnostic.code),
-          ),
+          hostServiceFactory: () =>
+              DurableLocalHostService(durableStorage: durableStorage),
+          snapshotStore: _MemoryLegacySnapshotStore(),
+          durableStorage: durableStorage,
+          diagnosticsSink: (diagnostic) => diagnostics.add(diagnostic.code),
         );
         Session? snapshot;
         runtime.bind(
@@ -159,16 +164,17 @@ void main() {
       'runtime emits read_failed diagnostics without consulting legacy seeding',
       () async {
         final diagnostics = <DurableLocalHostDiagnosticCode>[];
+        final durableStorage = _MemoryDurableStorage(
+          readError: StateError('read failed'),
+        );
         final runtime = HostDesktopSessionRuntime(
-          hostServiceFactory: () => DurableLocalHostService(
-            durableStorage: _MemoryDurableStorage(
-              readError: StateError('read failed'),
-            ),
-            legacySnapshotStore: _MemoryLegacySnapshotStore(
-              storedSession: _completedSession(),
-            ),
-            diagnosticsSink: (diagnostic) => diagnostics.add(diagnostic.code),
+          hostServiceFactory: () =>
+              DurableLocalHostService(durableStorage: durableStorage),
+          snapshotStore: _MemoryLegacySnapshotStore(
+            storedSession: _completedSession(),
           ),
+          durableStorage: durableStorage,
+          diagnosticsSink: (diagnostic) => diagnostics.add(diagnostic.code),
         );
         Session? snapshot;
         runtime.bind(
@@ -211,6 +217,7 @@ void main() {
           durableStorage: durableStorage,
           legacySnapshotStore: _MemoryLegacySnapshotStore(),
         ),
+        durableStorage: durableStorage,
       );
       Session? snapshot;
       runtime.bind(
@@ -240,7 +247,16 @@ void main() {
         ),
         legacySnapshotStore: _MemoryLegacySnapshotStore(),
       );
-      final runtime = HostDesktopSessionRuntime(hostService: hostService);
+      final runtime = HostDesktopSessionRuntime(
+        hostService: hostService,
+        durableStorage: _MemoryDurableStorage(
+          payload: jsonEncode(
+            const DesktopSessionSnapshotJsonCodec().encode(
+              _runningSessionWithNotifications(),
+            ),
+          ),
+        ),
+      );
       final snapshots = <Session>[];
       runtime.bind(
         onSnapshot: snapshots.add,
@@ -248,9 +264,9 @@ void main() {
       );
 
       await runtime.initialize();
-      final notificationId = snapshots.last.notifications.firstWhere(
-        (notification) => !notification.isAcknowledged,
-      ).id;
+      final notificationId = snapshots.last.notifications
+          .firstWhere((notification) => !notification.isAcknowledged)
+          .id;
 
       await runtime.acknowledgeNotification(notificationId: notificationId);
       await runtime.refresh();
@@ -262,19 +278,21 @@ void main() {
     });
 
     test('queued and running turns remain frozen after restart', () async {
+      final queuedStorage = _MemoryDurableStorage(
+        payload: jsonEncode(
+          const DesktopSessionSnapshotJsonCodec().encode(_queuedSession()),
+        ),
+      );
       final queuedRuntime = HostDesktopSessionRuntime(
         hostServiceFactory: () => DurableLocalHostService(
-          durableStorage: _MemoryDurableStorage(
-            payload: jsonEncode(
-              const DesktopSessionSnapshotJsonCodec().encode(_queuedSession()),
-            ),
-          ),
+          durableStorage: queuedStorage,
           legacySnapshotStore: _MemoryLegacySnapshotStore(),
           simulationPolicy: const HostExecutionSimulationPolicy(
             queuedToRunningDelay: Duration.zero,
             runningToTerminalDelay: Duration.zero,
           ),
         ),
+        durableStorage: queuedStorage,
       );
       Session? queuedSnapshot;
       queuedRuntime.bind(
@@ -287,21 +305,23 @@ void main() {
 
       expect(queuedSnapshot!.activeTurn?.status, TurnStatus.queued);
 
+      final runningStorage = _MemoryDurableStorage(
+        payload: jsonEncode(
+          const DesktopSessionSnapshotJsonCodec().encode(
+            _runningSessionWithNotifications(),
+          ),
+        ),
+      );
       final runningRuntime = HostDesktopSessionRuntime(
         hostServiceFactory: () => DurableLocalHostService(
-          durableStorage: _MemoryDurableStorage(
-            payload: jsonEncode(
-              const DesktopSessionSnapshotJsonCodec().encode(
-                _runningSessionWithNotifications(),
-              ),
-            ),
-          ),
+          durableStorage: runningStorage,
           legacySnapshotStore: _MemoryLegacySnapshotStore(),
           simulationPolicy: const HostExecutionSimulationPolicy(
             queuedToRunningDelay: Duration.zero,
             runningToTerminalDelay: Duration.zero,
           ),
         ),
+        durableStorage: runningStorage,
       );
       Session? runningSnapshot;
       runningRuntime.bind(
@@ -322,6 +342,7 @@ void main() {
         final runtime = HostDesktopSessionRuntime(
           hostService: hostService,
           snapshotStore: _MemoryLegacySnapshotStore(),
+          durableStorage: _MemoryDurableStorage(),
         );
         runtime.bind(
           onSnapshot: (session) {},
@@ -334,6 +355,10 @@ void main() {
         expect(hostService.watchStarts, 2);
         expect(hostService.watchCancels, 1);
         expect(hostService.concurrentWatchViolation, isFalse);
+        expect(hostService.createCalls, 0);
+        expect(hostService.attachCalls, 0);
+        expect(hostService.readCalls, 0);
+        expect(hostService.restoreCalls, 1);
       },
     );
 
@@ -341,20 +366,18 @@ void main() {
       'runtime emits durable restore failure diagnostics for fallback branch',
       () async {
         final diagnostics = <DurableLocalHostDiagnosticCode>[];
+        final durableStorage = _MemoryDurableStorage(
+          payload: jsonEncode(
+            const DesktopSessionSnapshotJsonCodec().encode(_queuedSession()),
+          ),
+        );
         final runtime = HostDesktopSessionRuntime(
           hostServiceFactory: () => _RejectingRestoreDurableLocalHostService(
-            durableStorage: _MemoryDurableStorage(
-              payload: jsonEncode(
-                const DesktopSessionSnapshotJsonCodec().encode(
-                  _queuedSession(),
-                ),
-              ),
-            ),
-            legacySnapshotStore: _MemoryLegacySnapshotStore(
-              storedSession: _completedSession(),
-            ),
-            diagnosticsSink: (diagnostic) => diagnostics.add(diagnostic.code),
+            durableStorage: durableStorage,
+            legacySnapshotStore: _MemoryLegacySnapshotStore(),
           ),
+          durableStorage: durableStorage,
+          diagnosticsSink: (diagnostic) => diagnostics.add(diagnostic.code),
         );
         Session? snapshot;
         runtime.bind(
@@ -390,7 +413,10 @@ void main() {
           legacySnapshotStore: _MemoryLegacySnapshotStore(),
           diagnosticsSink: (diagnostic) => diagnostics.add(diagnostic.code),
         );
-        final runtime = HostDesktopSessionRuntime(hostService: hostService);
+        final runtime = HostDesktopSessionRuntime(
+          hostService: hostService,
+          durableStorage: storage,
+        );
         Session? snapshot;
         runtime.bind(
           onSnapshot: (session) => snapshot = session,
@@ -551,6 +577,10 @@ final class _TrackingHostService implements HostService {
   final Map<String, StreamController<Session>> _controllers =
       <String, StreamController<Session>>{};
 
+  int createCalls = 0;
+  int attachCalls = 0;
+  int readCalls = 0;
+  int restoreCalls = 0;
   int watchStarts = 0;
   int watchCancels = 0;
   bool concurrentWatchViolation = false;
@@ -595,6 +625,7 @@ final class _TrackingHostService implements HostService {
 
   @override
   Session attachClient({required String sessionId, required Client client}) {
+    attachCalls += 1;
     final updated = _sessions[sessionId]!.attachClient(client);
     _sessions[sessionId] = updated;
     _controllers[sessionId]?.add(updated);
@@ -603,16 +634,21 @@ final class _TrackingHostService implements HostService {
 
   @override
   Session createSession({required String sessionId, required Host activeHost}) {
+    createCalls += 1;
     final session = Session(id: sessionId, activeHost: activeHost);
     _sessions[sessionId] = session;
     return session;
   }
 
   @override
-  Session readSession(String sessionId) => _sessions[sessionId]!;
+  Session readSession(String sessionId) {
+    readCalls += 1;
+    return _sessions[sessionId]!;
+  }
 
   @override
   Session restoreSession(Session session) {
+    restoreCalls += 1;
     _sessions[session.id] = session;
     return session;
   }

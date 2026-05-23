@@ -34,6 +34,7 @@ final class HostDesktopSessionRuntime implements DesktopSessionRuntime {
     CommonCodeSessionFacade? facade,
     Object? hostService,
     Object? snapshotStore,
+    Object? durableStorage,
     Object Function()? hostServiceFactory,
     Object? diagnosticsSink,
     String defaultSessionId = desktopSessionRuntimeDefaultSessionId,
@@ -44,6 +45,7 @@ final class HostDesktopSessionRuntime implements DesktopSessionRuntime {
            createDesktopSessionFacade(
              hostService: hostService,
              snapshotStore: snapshotStore,
+             durableStorage: durableStorage,
              hostServiceFactory: hostServiceFactory,
              diagnosticsSink: diagnosticsSink,
              defaultSessionId: defaultSessionId,
