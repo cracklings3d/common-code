@@ -1,4 +1,7 @@
+// ignore_for_file: implementation_imports
+
 import 'package:common_code_application/common_code_application.dart';
+import 'package:common_code_application/src/common_code_session_bootstrap.dart';
 import 'package:common_code_domain/common_code_domain.dart';
 import 'package:host_core/host_core.dart';
 
@@ -121,12 +124,18 @@ final class HostCoreDesktopSessionDriver implements CommonCodeSessionDriver {
 
     if (service case final DurableLocalHostService durableService) {
       final bootstrappedSession = await _bootstrapOrchestrator.bootstrap(
-        port: durableService,
         request: CommonCodeSessionBootstrapRequest(
           defaultSessionId: _defaultSessionId,
           hostId: _hostId,
           attachedClientId: _attachedClientId,
         ),
+        isBootstrapped: durableService.isBootstrapped,
+        readBootstrappedSession: durableService.readBootstrappedSession,
+        loadDurableSessionCandidate: durableService.loadDurableSessionCandidate,
+        restoreDurableSession: durableService.restoreDurableSession,
+        loadLegacySeedSession: durableService.loadLegacySeedSession,
+        restoreLegacySeededSession: durableService.restoreLegacySeededSession,
+        createFreshSession: durableService.createFreshSession,
       );
       _currentSessionId = bootstrappedSession.id;
       _isBootstrapped = true;

@@ -197,6 +197,47 @@ void main() {
       },
     );
 
+    test(
+      'runtime falls back fresh when legacy restore persist fails',
+      () async {
+        final diagnostics = <DurableLocalHostDiagnosticCode>[];
+        final runtime = HostDesktopSessionRuntime(
+          hostServiceFactory: () => DurableLocalHostService(
+            durableStorage: _MemoryDurableStorage(
+              writeError: StateError('write failed'),
+            ),
+            legacySnapshotStore: _MemoryLegacySnapshotStore(
+              storedSession: _completedSession(),
+            ),
+            diagnosticsSink: (diagnostic) => diagnostics.add(diagnostic.code),
+          ),
+        );
+        Session? snapshot;
+        runtime.bind(
+          onSnapshot: (session) => snapshot = session,
+          onWatchError: (error, stackTrace) {},
+        );
+
+        await runtime.initialize();
+
+        expect(snapshot, isNotNull);
+        expect(snapshot!.id, desktopSessionRuntimeDefaultSessionId);
+        expect(
+          diagnostics,
+          containsAllInOrder(<DurableLocalHostDiagnosticCode>[
+            DurableLocalHostDiagnosticCode.durableReadMissing,
+            DurableLocalHostDiagnosticCode.legacySeedActivated,
+            DurableLocalHostDiagnosticCode.legacySeedFailed,
+            DurableLocalHostDiagnosticCode.freshBootstrapActivated,
+          ]),
+        );
+        expect(
+          diagnostics,
+          isNot(contains(DurableLocalHostDiagnosticCode.legacySeedSucceeded)),
+        );
+      },
+    );
+
     test('restart continuity surfaces restored durable state', () async {
       final durableStorage = _MemoryDurableStorage(
         payload: jsonEncode(
@@ -527,6 +568,7 @@ final class _MemoryDurableStorage implements DurableLocalHostStorage {
     this.payload,
     this.legacySeedEnabled = true,
     this.readError,
+    this.writeError,
   });
 
   String? payload;
