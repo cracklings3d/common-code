@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:common_code_application/common_code_application.dart';
 import 'package:common_code_desktop/src/desktop_session_controller.dart';
 import 'package:common_code_desktop/src/desktop_session_runtime.dart';
 import 'package:common_code_domain/common_code_domain.dart';
@@ -21,7 +22,9 @@ void main() {
 
         expect(controller.state.status, DesktopSessionControllerStatus.loading);
 
-        runtime.emitSnapshot(_bootstrapSession());
+        runtime.emitState(
+          CommonCodeSessionFacadeState.data(_applicationSnapshot),
+        );
         await initializeFuture;
 
         expect(controller.state.status, DesktopSessionControllerStatus.data);
@@ -38,7 +41,9 @@ void main() {
 
       expect(controller.state.status, DesktopSessionControllerStatus.loading);
 
-      runtime.emitSnapshot(_bootstrapSession());
+      runtime.emitState(
+        CommonCodeSessionFacadeState.data(_applicationSnapshot),
+      );
       await refreshFuture;
 
       expect(controller.state.status, DesktopSessionControllerStatus.data);
@@ -48,7 +53,9 @@ void main() {
       final runtime = _FakeDesktopSessionRuntime();
       final controller = DesktopSessionController(runtime: runtime);
 
-      runtime.emitSnapshot(_bootstrapSession());
+      runtime.emitState(
+        CommonCodeSessionFacadeState.data(_applicationSnapshot),
+      );
 
       expect(controller.state.status, DesktopSessionControllerStatus.data);
       expect(controller.state.snapshot, isNotNull);
@@ -59,7 +66,9 @@ void main() {
       final runtime = _FakeDesktopSessionRuntime();
       final controller = DesktopSessionController(runtime: runtime);
 
-      runtime.emitWatchError(StateError('watch boom'));
+      runtime.emitState(
+        const CommonCodeSessionFacadeState.error('Bad state: watch boom'),
+      );
 
       expect(controller.state.status, DesktopSessionControllerStatus.error);
       expect(controller.state.message, contains('watch boom'));
@@ -69,7 +78,9 @@ void main() {
       final runtime = _FakeDesktopSessionRuntime();
       final controller = DesktopSessionController(runtime: runtime);
 
-      runtime.emitSnapshot(_bootstrapSession());
+      runtime.emitState(
+        CommonCodeSessionFacadeState.data(_applicationSnapshot),
+      );
 
       final submitFuture = controller.submitTurn(submittedText: 'queued turn');
 
@@ -90,7 +101,9 @@ void main() {
           ..submitError = StateError('submit failed');
         final controller = DesktopSessionController(runtime: runtime);
 
-        runtime.emitSnapshot(_bootstrapSession());
+        runtime.emitState(
+          CommonCodeSessionFacadeState.data(_applicationSnapshot),
+        );
 
         await expectLater(
           controller.submitTurn(submittedText: 'bad turn'),
@@ -110,7 +123,14 @@ void main() {
           ..acknowledgeError = StateError('ack failed');
         final controller = DesktopSessionController(runtime: runtime);
 
-        runtime.emitSnapshot(_sessionWithNotification());
+        runtime.emitState(
+          CommonCodeSessionFacadeState.data(
+            CommonCodeSessionSnapshot(
+              session: _sessionWithNotification(),
+              attachedClientId: 'desktop-client',
+            ),
+          ),
+        );
 
         await expectLater(
           controller.acknowledgeNotification(notificationId: 'notification-1'),
@@ -130,17 +150,26 @@ void main() {
       final runtime = _FakeDesktopSessionRuntime();
       final controller = DesktopSessionController(runtime: runtime);
 
-      runtime.emitSnapshot(_bootstrapSession());
+      runtime.emitState(
+        CommonCodeSessionFacadeState.data(_applicationSnapshot),
+      );
       controller.dispose();
 
-      runtime.emitSnapshot(
-        _bootstrapSession().startTurn(
-          turnId: 'turn-1',
-          client: const Client(id: 'desktop-client'),
-          submittedText: 'late event',
+      runtime.emitState(
+        CommonCodeSessionFacadeState.data(
+          CommonCodeSessionSnapshot(
+            session: _bootstrapSession().startTurn(
+              turnId: 'turn-1',
+              client: const Client(id: 'desktop-client'),
+              submittedText: 'late event',
+            ),
+            attachedClientId: 'desktop-client',
+          ),
         ),
       );
-      runtime.emitWatchError(StateError('late watch boom'));
+      runtime.emitState(
+        const CommonCodeSessionFacadeState.error('Bad state: late watch boom'),
+      );
 
       expect(controller.state.status, DesktopSessionControllerStatus.data);
       expect(controller.state.snapshot!.session.activeTurn, isNull);
@@ -157,6 +186,15 @@ final _snapshot = DesktopSessionSnapshot(
   attachedClientId: 'desktop-client',
 );
 
+final _applicationSnapshot = CommonCodeSessionSnapshot(
+  session: Session(
+    id: 'desktop-session',
+    activeHost: const Host(id: 'desktop-host'),
+    clients: const [Client(id: 'desktop-client')],
+  ),
+  attachedClientId: 'desktop-client',
+);
+
 Session _bootstrapSession() {
   return Session(
     id: 'desktop-session',
@@ -165,8 +203,8 @@ Session _bootstrapSession() {
 }
 
 final class _FakeDesktopSessionRuntime implements DesktopSessionRuntime {
-  void Function(Session session)? _onSnapshot;
-  void Function(Object error, StackTrace stackTrace)? _onWatchError;
+  final StreamController<CommonCodeSessionFacadeState> _states =
+      StreamController<CommonCodeSessionFacadeState>.broadcast(sync: true);
 
   final List<String> submittedTexts = <String>[];
   final List<String> acknowledgedNotificationIds = <String>[];
@@ -174,16 +212,21 @@ final class _FakeDesktopSessionRuntime implements DesktopSessionRuntime {
   Completer<void>? _pendingRefresh;
   Completer<void>? _pendingSubmit;
   Object? submitError;
+  CommonCodeSessionFacadeState _state =
+      const CommonCodeSessionFacadeState.loading();
   Object? acknowledgeError;
 
   @override
   void bind({
     required void Function(Session session) onSnapshot,
     required void Function(Object error, StackTrace stackTrace) onWatchError,
-  }) {
-    _onSnapshot = onSnapshot;
-    _onWatchError = onWatchError;
-  }
+  }) {}
+
+  @override
+  Stream<CommonCodeSessionFacadeState> get states => _states.stream;
+
+  @override
+  CommonCodeSessionFacadeState get state => _state;
 
   @override
   Future<void> initialize() {
@@ -221,16 +264,13 @@ final class _FakeDesktopSessionRuntime implements DesktopSessionRuntime {
     return Future<void>.value();
   }
 
-  void emitSnapshot(Session session) {
-    _onSnapshot?.call(session);
-    _pendingInitialize?.complete();
-    _pendingInitialize = null;
-    _pendingRefresh?.complete();
-    _pendingRefresh = null;
-  }
+  void emitState(CommonCodeSessionFacadeState state) {
+    if (_states.isClosed) {
+      return;
+    }
 
-  void emitWatchError(Object error) {
-    _onWatchError?.call(error, StackTrace.current);
+    _state = state;
+    _states.add(state);
     _pendingInitialize?.complete();
     _pendingInitialize = null;
     _pendingRefresh?.complete();
@@ -247,6 +287,7 @@ final class _FakeDesktopSessionRuntime implements DesktopSessionRuntime {
     _pendingInitialize?.complete();
     _pendingRefresh?.complete();
     _pendingSubmit?.complete();
+    await _states.close();
   }
 }
 
