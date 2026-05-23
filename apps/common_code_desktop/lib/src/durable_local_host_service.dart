@@ -164,10 +164,15 @@ class DurableLocalHostService implements HostService {
         return const CommonCodeDurableBootstrapLoadResult.missing();
       }
 
-      final decodedDurableSession = _decodeDurableSession(
-        encodedDurableSession,
-        desktopClientId: attachedClientId,
-      );
+      Session? decodedDurableSession;
+      try {
+        decodedDurableSession = _codec.decode(
+          jsonDecode(encodedDurableSession),
+          desktopClientId: attachedClientId,
+        );
+      } catch (_) {
+        // Decoding failed, will fall through to seedOrCreateFresh
+      }
       if (decodedDurableSession == null) {
         _emit(
           const DurableLocalHostDiagnostic(
@@ -408,20 +413,6 @@ class DurableLocalHostService implements HostService {
     }
 
     return attachedSession;
-  }
-
-  Session? _decodeDurableSession(
-    String encodedSession, {
-    required String desktopClientId,
-  }) {
-    try {
-      return _codec.decode(
-        jsonDecode(encodedSession),
-        desktopClientId: desktopClientId,
-      );
-    } catch (_) {
-      return null;
-    }
   }
 
   void _emit(DurableLocalHostDiagnostic diagnostic) {

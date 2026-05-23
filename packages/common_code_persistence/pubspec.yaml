@@ -7,3 +7,6 @@ dependencies:
   common_code_domain:
     path: ../common_code_domain
   shared_preferences: ^2.2.0
+
+dev_dependencies:
+  test: ^1.25.6
