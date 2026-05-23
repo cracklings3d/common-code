@@ -2,6 +2,8 @@ import 'dart:async';
 
 import 'package:common_code_application/common_code_application.dart';
 import 'package:common_code_application/src/common_code_session_bootstrap.dart';
+import 'package:common_code_application/src/common_code_session_observation.dart';
+import 'package:common_code_application/src/host_gateway.dart';
 import 'package:common_code_domain/common_code_domain.dart';
 import 'package:test/test.dart';
 
@@ -9,10 +11,15 @@ void main() {
   group('CommonCodeSessionFacade', () {
     test('initialize emits loading then data from observed session', () async {
       final driver = _FakeCommonCodeSessionDriver();
+      final observation = _FakeObservation();
+      final hostGateway = _FakeHostGateway(driver: driver);
       final facade = CommonCodeSessionFacade(
         driver: driver,
+        observation: observation,
+        hostGateway: hostGateway,
         attachedClientId: 'desktop-client',
       );
+      observation.injectDriver(driver);
 
       final initializeFuture = facade.initialize();
       await Future<void>.delayed(Duration.zero);
@@ -34,10 +41,15 @@ void main() {
       final driver = _FakeCommonCodeSessionDriver(
         binding: const CommonCodeSessionBinding.empty(),
       );
+      final observation = _FakeObservation();
+      final hostGateway = _FakeHostGateway(driver: driver);
       final facade = CommonCodeSessionFacade(
         driver: driver,
+        observation: observation,
+        hostGateway: hostGateway,
         attachedClientId: 'desktop-client',
       );
+      observation.injectDriver(driver);
 
       await facade.initialize();
 
@@ -48,10 +60,15 @@ void main() {
 
     test('refresh cancels the prior watch before replacement watch', () async {
       final driver = _FakeCommonCodeSessionDriver();
+      final observation = _FakeObservation();
+      final hostGateway = _FakeHostGateway(driver: driver);
       final facade = CommonCodeSessionFacade(
         driver: driver,
+        observation: observation,
+        hostGateway: hostGateway,
         attachedClientId: 'desktop-client',
       );
+      observation.injectDriver(driver);
 
       final initializeFuture = facade.initialize();
       await Future<void>.delayed(Duration.zero);
@@ -71,10 +88,15 @@ void main() {
 
     test('submit keeps submission state until completion', () async {
       final driver = _FakeCommonCodeSessionDriver();
+      final observation = _FakeObservation();
+      final hostGateway = _FakeHostGateway(driver: driver);
       final facade = CommonCodeSessionFacade(
         driver: driver,
+        observation: observation,
+        hostGateway: hostGateway,
         attachedClientId: 'desktop-client',
       );
+      observation.injectDriver(driver);
 
       final initializeFuture = facade.initialize();
       await Future<void>.delayed(Duration.zero);
@@ -99,10 +121,15 @@ void main() {
     test('submit failure emits renderable error state', () async {
       final driver = _FakeCommonCodeSessionDriver()
         ..submitError = StateError('submit failed');
+      final observation = _FakeObservation();
+      final hostGateway = _FakeHostGateway(driver: driver);
       final facade = CommonCodeSessionFacade(
         driver: driver,
+        observation: observation,
+        hostGateway: hostGateway,
         attachedClientId: 'desktop-client',
       );
+      observation.injectDriver(driver);
 
       final initializeFuture = facade.initialize();
       await Future<void>.delayed(Duration.zero);
@@ -124,10 +151,15 @@ void main() {
 
     test('acknowledgement delegates to driver for current session', () async {
       final driver = _FakeCommonCodeSessionDriver();
+      final observation = _FakeObservation();
+      final hostGateway = _FakeHostGateway(driver: driver);
       final facade = CommonCodeSessionFacade(
         driver: driver,
+        observation: observation,
+        hostGateway: hostGateway,
         attachedClientId: 'desktop-client',
       );
+      observation.injectDriver(driver);
 
       final initializeFuture = facade.initialize();
       await Future<void>.delayed(Duration.zero);
@@ -425,6 +457,44 @@ final class _FakeCommonCodeSessionDriver implements CommonCodeSessionDriver {
     );
     _controllers.add(controller);
     return controller.stream;
+  }
+}
+
+final class _FakeObservation implements CommonCodeSessionObservation {
+  _FakeObservation();
+
+  CommonCodeSessionDriver? _driver;
+
+  void injectDriver(CommonCodeSessionDriver driver) {
+    _driver = driver;
+  }
+
+  @override
+  Stream<Session> watchSession(String sessionId) {
+    if (_driver == null) {
+      throw StateError('Driver not injected');
+    }
+    return _driver!.watchSession(sessionId);
+  }
+}
+
+final class _FakeHostGateway implements HostGateway {
+  _FakeHostGateway({required CommonCodeSessionDriver driver})
+      : _driver = driver;
+
+  final CommonCodeSessionDriver _driver;
+
+  @override
+  Future<void> submitTurn({
+    required String sessionId,
+    required Client client,
+    required String submittedText,
+  }) async {
+    await _driver.submitTurn(
+      sessionId: sessionId,
+      attachedClientId: client.id,
+      submittedText: submittedText,
+    );
   }
 }
 
