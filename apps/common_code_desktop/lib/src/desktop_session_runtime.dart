@@ -22,6 +22,8 @@ abstract interface class DesktopSessionRuntime {
 
   Future<void> refresh();
 
+  Future<void> acknowledgeNotification({required String notificationId});
+
   Future<void> submitTurn({required String submittedText});
 
   Future<void> dispose();
@@ -82,6 +84,10 @@ final class HostDesktopSessionRuntime implements DesktopSessionRuntime {
 
   @override
   Future<void> refresh() => _facade.refresh();
+
+  @override
+  Future<void> acknowledgeNotification({required String notificationId}) =>
+      _facade.acknowledgeNotification(notificationId: notificationId);
 
   @override
   Future<void> submitTurn({required String submittedText}) =>

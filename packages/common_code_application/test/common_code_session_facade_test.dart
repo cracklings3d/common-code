@@ -120,6 +120,27 @@ void main() {
 
       await facade.dispose();
     });
+
+    test('acknowledgement delegates to driver for current session', () async {
+      final driver = _FakeCommonCodeSessionDriver();
+      final facade = CommonCodeSessionFacade(
+        driver: driver,
+        attachedClientId: 'desktop-client',
+      );
+
+      final initializeFuture = facade.initialize();
+      await Future<void>.delayed(Duration.zero);
+      driver.emitSession(_bootstrapSessionWithNotification());
+      await initializeFuture;
+
+      final notificationId =
+          facade.state.snapshot!.session.notifications.single.id;
+      await facade.acknowledgeNotification(notificationId: notificationId);
+
+      expect(driver.acknowledgedNotificationIds, [notificationId]);
+
+      await facade.dispose();
+    });
   });
 }
 
@@ -130,6 +151,30 @@ Session _bootstrapSession() {
   ).attachClient(const Client(id: 'desktop-client'));
 }
 
+Session _bootstrapSessionWithNotification() {
+  final session = _bootstrapSession()
+      .startTurn(
+        turnId: 'turn-1',
+        client: const Client(id: 'desktop-client'),
+        submittedText: 'queued turn',
+      )
+      .advanceActiveTurnToRunning();
+
+  return Session(
+    id: session.id,
+    activeHost: session.activeHost,
+    clients: session.clients,
+    promptThread: session.promptThread,
+    notifications: [
+      SessionNotification.forTransition(
+        sessionId: session.id,
+        turnId: 'turn-1',
+        transition: SessionNotificationTransition.queuedToRunning,
+      ),
+    ],
+  );
+}
+
 final class _FakeCommonCodeSessionDriver implements CommonCodeSessionDriver {
   _FakeCommonCodeSessionDriver({
     this.binding = const CommonCodeSessionBinding.attached(
@@ -138,6 +183,7 @@ final class _FakeCommonCodeSessionDriver implements CommonCodeSessionDriver {
   });
 
   final CommonCodeSessionBinding binding;
+  final List<String> acknowledgedNotificationIds = <String>[];
   final List<String> submittedTexts = <String>[];
   final List<StreamController<Session>> _controllers =
       <StreamController<Session>>[];
@@ -162,6 +208,14 @@ final class _FakeCommonCodeSessionDriver implements CommonCodeSessionDriver {
     }
 
     _controllers.last.add(session);
+  }
+
+  @override
+  Future<void> acknowledgeNotification({
+    required String sessionId,
+    required String notificationId,
+  }) async {
+    acknowledgedNotificationIds.add(notificationId);
   }
 
   @override

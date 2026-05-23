@@ -1,9 +1,16 @@
 import 'dart:async';
+import 'dart:convert';
 
+import 'package:common_code_application/common_code_application.dart';
 import 'package:common_code_desktop/main.dart';
 import 'package:common_code_desktop/src/desktop_session_controller.dart';
+import 'package:common_code_desktop/src/desktop_session_runtime.dart';
+import 'package:common_code_desktop/src/desktop_session_snapshot_codec.dart';
+import 'package:common_code_desktop/src/desktop_session_snapshot_store.dart';
+import 'package:common_code_desktop/src/durable_local_host_service.dart';
 import 'package:common_code_domain/common_code_domain.dart';
-import 'package:flutter/material.dart' show FilledButton, TextField;
+import 'package:flutter/material.dart'
+    show FilledButton, SizedBox, SnackBar, TextField;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -234,9 +241,7 @@ void main() {
 
     controller.emit(
       DesktopSessionControllerState.data(
-        _buildSnapshot(
-          session: _buildRunningTurnSessionWithNotification(),
-        ),
+        _buildSnapshot(session: _buildRunningTurnSessionWithNotification()),
       ),
     );
     await tester.pump();
@@ -247,9 +252,7 @@ void main() {
 
     controller.emit(
       DesktopSessionControllerState.data(
-        _buildSnapshot(
-          session: _buildCompletedTurnSessionWithNotification(),
-        ),
+        _buildSnapshot(session: _buildCompletedTurnSessionWithNotification()),
       ),
     );
     await tester.pump();
@@ -277,9 +280,7 @@ void main() {
 
       controller.emit(
         DesktopSessionControllerState.data(
-          _buildSnapshot(
-            session: _buildRunningTurnSessionWithNotification(),
-          ),
+          _buildSnapshot(session: _buildRunningTurnSessionWithNotification()),
         ),
       );
       await tester.pump();
@@ -287,9 +288,7 @@ void main() {
 
       controller.emit(
         DesktopSessionControllerState.data(
-          _buildSnapshot(
-            session: _buildFailedTurnSessionWithNotification(),
-          ),
+          _buildSnapshot(session: _buildFailedTurnSessionWithNotification()),
         ),
       );
       await tester.pump();
@@ -332,32 +331,31 @@ void main() {
     },
   );
 
-  testWidgets(
-    'first render suppresses an already acknowledged notification',
-    (WidgetTester tester) async {
-      final controller = _FakeDesktopSessionController(
-        onInitialize: (controller) {
-          controller.emit(
-            DesktopSessionControllerState.data(
-              _buildSnapshot(
-                session: _buildRunningTurnSessionWithNotification(
-                  isAcknowledged: true,
-                ),
+  testWidgets('first render suppresses an already acknowledged notification', (
+    WidgetTester tester,
+  ) async {
+    final controller = _FakeDesktopSessionController(
+      onInitialize: (controller) {
+        controller.emit(
+          DesktopSessionControllerState.data(
+            _buildSnapshot(
+              session: _buildRunningTurnSessionWithNotification(
+                isAcknowledged: true,
               ),
             ),
-          );
-        },
-      );
+          ),
+        );
+      },
+    );
 
-      await tester.pumpWidget(
-        CommonCodeDesktopApp(sessionController: controller),
-      );
-      await tester.pumpAndSettle();
+    await tester.pumpWidget(
+      CommonCodeDesktopApp(sessionController: controller),
+    );
+    await tester.pumpAndSettle();
 
-      expect(find.text('Lifecycle: active (running)'), findsOneWidget);
-      expect(find.text('Turn running: Stored submitted turn'), findsNothing);
-    },
-  );
+    expect(find.text('Lifecycle: active (running)'), findsOneWidget);
+    expect(find.text('Turn running: Stored submitted turn'), findsNothing);
+  });
 
   testWidgets(
     'repeated delivery of the same notification id does not duplicate visible renders in one runtime',
@@ -463,6 +461,109 @@ void main() {
       expect(find.text('Turn running: Stored submitted turn'), findsNothing);
     },
   );
+
+  testWidgets(
+    'explicit snackbar acknowledgement uses the live desktop seam and suppresses replay after reconnect',
+    (WidgetTester tester) async {
+      SharedPreferences.setMockInitialValues(<String, Object>{
+        SharedPreferencesDurableLocalHostStorage.sessionStorageKey: jsonEncode(
+          const DesktopSessionSnapshotJsonCodec().encode(
+            _buildRunningTurnSessionWithNotification(),
+          ),
+        ),
+      });
+
+      final replayedSnackBarMessage = find.descendant(
+        of: find.byType(SnackBar),
+        matching: find.text('Turn running: Stored submitted turn'),
+      );
+      final hostService = DurableLocalHostService(
+        durableStorage: SharedPreferencesDurableLocalHostStorage(),
+        legacySnapshotStore: SharedPreferencesDesktopSessionSnapshotStore(),
+      );
+      final controller = DesktopSessionController(
+        runtime: HostDesktopSessionRuntime(hostService: hostService),
+      );
+
+      await tester.pumpWidget(
+        CommonCodeDesktopApp(sessionController: controller),
+      );
+      await tester.pumpAndSettle();
+
+      expect(replayedSnackBarMessage, findsOneWidget);
+      expect(find.text('Acknowledge'), findsOneWidget);
+
+      final notificationId = controller.state.snapshot!.session.notifications
+          .firstWhere((notification) => !notification.isAcknowledged)
+          .id;
+
+      await tester.tap(find.text('Acknowledge'));
+      await tester.pumpAndSettle();
+
+      expect(
+        controller.state.snapshot!.session.notifications
+            .firstWhere((notification) => notification.id == notificationId)
+            .isAcknowledged,
+        isTrue,
+      );
+      expect(
+        hostService
+            .readSession(controller.state.snapshot!.session.id)
+            .notifications
+            .firstWhere((notification) => notification.id == notificationId)
+            .isAcknowledged,
+        isTrue,
+      );
+
+      await tester.pumpWidget(const SizedBox.shrink());
+      await tester.pumpAndSettle();
+      controller.dispose();
+
+      final reconnectedController = DesktopSessionController(
+        runtime: HostDesktopSessionRuntime(hostService: hostService),
+      );
+
+      await tester.pumpWidget(
+        CommonCodeDesktopApp(sessionController: reconnectedController),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.text('Prompt Thread'), findsOneWidget);
+      expect(replayedSnackBarMessage, findsNothing);
+
+      reconnectedController.dispose();
+    },
+  );
+
+  testWidgets('acknowledgement failures surface through controller state', (
+    WidgetTester tester,
+  ) async {
+    final controller = DesktopSessionController(
+      runtime: _AcknowledgeFailingRuntime(
+        session: _buildRunningTurnSessionWithNotification(),
+      ),
+    );
+
+    await tester.pumpWidget(
+      CommonCodeDesktopApp(sessionController: controller),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('Acknowledge'));
+    await tester.pumpAndSettle();
+
+    expect(
+      find.textContaining(
+        'Failed to acknowledge notification: Bad state: ack failed',
+      ),
+      findsOneWidget,
+    );
+    expect(
+      controller.state.acknowledgementErrorMessage,
+      contains('ack failed'),
+    );
+    expect(controller.state.status, DesktopSessionControllerStatus.data);
+  });
 
   testWidgets(
     'completed outcome notification renders from session-backed notification data',
@@ -734,7 +835,9 @@ Session _buildCrossClientReadOnlySession() {
 
 Session _buildQueuedTurnSession() => _buildActiveTurnSession();
 
-Session _buildRunningTurnSessionWithNotification({bool isAcknowledged = false}) {
+Session _buildRunningTurnSessionWithNotification({
+  bool isAcknowledged = false,
+}) {
   return _buildSessionWithNotifications(
     turns: const [
       Turn.running(
@@ -843,19 +946,27 @@ typedef _SubmitCallback =
       _FakeDesktopSessionController controller,
       String submittedText,
     );
+typedef _AcknowledgeCallback =
+    FutureOr<void> Function(
+      _FakeDesktopSessionController controller,
+      String notificationId,
+    );
 
 final class _FakeDesktopSessionController extends DesktopSessionController {
   _FakeDesktopSessionController({
     _ControllerCallback? onInitialize,
     _ControllerCallback? onRefresh,
     _SubmitCallback? onSubmit,
+    _AcknowledgeCallback? onAcknowledge,
   }) : _onInitialize = onInitialize,
        _onRefresh = onRefresh,
-       _onSubmit = onSubmit;
+       _onSubmit = onSubmit,
+       _onAcknowledge = onAcknowledge;
 
   final _ControllerCallback? _onInitialize;
   final _ControllerCallback? _onRefresh;
   final _SubmitCallback? _onSubmit;
+  final _AcknowledgeCallback? _onAcknowledge;
   final List<String> submittedTexts = <String>[];
 
   void emit(DesktopSessionControllerState state) {
@@ -874,5 +985,69 @@ final class _FakeDesktopSessionController extends DesktopSessionController {
       DesktopSessionControllerState.data(_buildSnapshot(), isSubmitting: true),
     );
     await Future.sync(() => _onSubmit?.call(this, submittedText));
+  }
+
+  @override
+  Future<void> acknowledgeNotification({required String notificationId}) {
+    return Future.sync(() => _onAcknowledge?.call(this, notificationId));
+  }
+}
+
+final class _AcknowledgeFailingRuntime implements DesktopSessionRuntime {
+  _AcknowledgeFailingRuntime({required Session session}) : _session = session;
+
+  final Session _session;
+  final StreamController<CommonCodeSessionFacadeState> _states =
+      StreamController<CommonCodeSessionFacadeState>.broadcast(sync: true);
+  CommonCodeSessionFacadeState _state =
+      const CommonCodeSessionFacadeState.loading();
+
+  @override
+  void bind({
+    required void Function(Session session) onSnapshot,
+    required void Function(Object error, StackTrace stackTrace) onWatchError,
+  }) {}
+
+  @override
+  Stream<CommonCodeSessionFacadeState> get states => _states.stream;
+
+  @override
+  CommonCodeSessionFacadeState get state => _state;
+
+  @override
+  Future<void> initialize() async {
+    _emitSession();
+  }
+
+  @override
+  Future<void> refresh() async {
+    _emitSession();
+  }
+
+  @override
+  Future<void> acknowledgeNotification({required String notificationId}) {
+    return Future<void>.error(StateError('ack failed'));
+  }
+
+  @override
+  Future<void> submitTurn({required String submittedText}) async {}
+
+  @override
+  Future<void> dispose() async {
+    await _states.close();
+  }
+
+  void _emitSession() {
+    if (_states.isClosed) {
+      return;
+    }
+
+    _state = CommonCodeSessionFacadeState.data(
+      CommonCodeSessionSnapshot(
+        session: _session,
+        attachedClientId: DesktopSessionController.attachedClientId,
+      ),
+    );
+    _states.add(_state);
   }
 }

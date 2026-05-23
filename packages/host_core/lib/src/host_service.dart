@@ -5,6 +5,11 @@ abstract interface class HostService {
 
   Session attachClient({required String sessionId, required Client client});
 
+  Session acknowledgeNotification({
+    required String sessionId,
+    required String notificationId,
+  });
+
   Stream<Session> watchSession(String sessionId);
 
   Session restoreSession(Session session);

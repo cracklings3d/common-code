@@ -85,6 +85,11 @@ abstract interface class CommonCodeSessionDriver {
 
   Stream<Session> watchSession(String sessionId);
 
+  FutureOr<void> acknowledgeNotification({
+    required String sessionId,
+    required String notificationId,
+  });
+
   FutureOr<void> submitTurn({
     required String sessionId,
     required String attachedClientId,
@@ -124,6 +129,20 @@ final class CommonCodeSessionFacade {
   Future<void> refresh() async {
     _emitState(const CommonCodeSessionFacadeState.loading());
     await _startSessionWatch();
+  }
+
+  Future<void> acknowledgeNotification({required String notificationId}) async {
+    final sessionId = await _ensureSessionId();
+    if (sessionId == null) {
+      throw StateError('No session available.');
+    }
+
+    await Future.sync(
+      () => _driver.acknowledgeNotification(
+        sessionId: sessionId,
+        notificationId: notificationId,
+      ),
+    );
   }
 
   Future<void> submitTurn({required String submittedText}) async {

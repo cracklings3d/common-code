@@ -76,6 +76,20 @@ final class HostCoreDesktopSessionDriver implements CommonCodeSessionDriver {
   }
 
   @override
+  Future<void> acknowledgeNotification({
+    required String sessionId,
+    required String notificationId,
+  }) async {
+    final service = _service ??= _hostService ?? _hostServiceFactory();
+    await _bootstrapIfNeeded();
+
+    service.acknowledgeNotification(
+      sessionId: sessionId,
+      notificationId: notificationId,
+    );
+  }
+
+  @override
   Future<void> submitTurn({
     required String sessionId,
     required String attachedClientId,

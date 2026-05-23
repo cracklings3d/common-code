@@ -104,7 +104,23 @@ class _SessionScreenState extends State<SessionScreen> {
       messenger.removeCurrentSnackBar();
 
       for (final notice in notices) {
-        messenger.showSnackBar(SnackBar(content: Text(notice.message)));
+        messenger.showSnackBar(
+          SnackBar(
+            content: Text(notice.message),
+            action: SnackBarAction(
+              label: 'Acknowledge',
+              onPressed: () async {
+                try {
+                  await widget.sessionController.acknowledgeNotification(
+                    notificationId: notice.notificationId,
+                  );
+                } catch (_) {
+                  // The controller already exposes acknowledgement failures.
+                }
+              },
+            ),
+          ),
+        );
       }
     });
   }
@@ -175,6 +191,8 @@ class _SessionScreenState extends State<SessionScreen> {
                     onRefresh: _refreshSession,
                     onSubmitTurn: _submitTurn,
                     isSubmitting: state.isSubmitting,
+                    acknowledgementErrorMessage:
+                        state.acknowledgementErrorMessage,
                   ),
                 },
               ),
@@ -217,7 +235,10 @@ List<_SessionNotificationNotice> _consumeSessionNotifications({
 }
 
 final class _SessionNotificationNotice {
-  const _SessionNotificationNotice._({required this.message});
+  const _SessionNotificationNotice._({
+    required this.notificationId,
+    required this.message,
+  });
 
   static _SessionNotificationNotice? fromNotification({
     required SessionNotification notification,
@@ -230,19 +251,23 @@ final class _SessionNotificationNotice {
     return switch (notification.transition) {
       SessionNotificationTransition.queuedToRunning =>
         _SessionNotificationNotice._(
+          notificationId: notification.id,
           message: 'Turn running: ${turn.submittedText}',
         ),
       SessionNotificationTransition.runningToCompleted =>
         _SessionNotificationNotice._(
+          notificationId: notification.id,
           message: 'Turn completed: ${turn.submittedText}',
         ),
       SessionNotificationTransition.runningToFailed =>
         _SessionNotificationNotice._(
+          notificationId: notification.id,
           message: 'Turn failed: ${turn.submittedText}',
         ),
     };
   }
 
+  final String notificationId;
   final String message;
 }
 
@@ -314,6 +339,7 @@ class _SessionDataView extends StatelessWidget {
     required this.onRefresh,
     required this.onSubmitTurn,
     required this.isSubmitting,
+    this.acknowledgementErrorMessage,
   });
 
   final DesktopSessionSnapshot snapshot;
@@ -321,6 +347,7 @@ class _SessionDataView extends StatelessWidget {
   final Future<void> Function() onRefresh;
   final Future<void> Function() onSubmitTurn;
   final bool isSubmitting;
+  final String? acknowledgementErrorMessage;
 
   @override
   Widget build(BuildContext context) {
@@ -332,6 +359,12 @@ class _SessionDataView extends StatelessWidget {
     return _SessionSection(
       title: 'Prompt Thread',
       children: [
+        if (acknowledgementErrorMessage != null) ...[
+          Text(
+            'Failed to acknowledge notification: $acknowledgementErrorMessage',
+          ),
+          const SizedBox(height: 16),
+        ],
         _SessionContextChrome(
           snapshot: snapshot,
           authoringPresentation: authoringPresentation,
