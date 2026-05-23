@@ -14,6 +14,7 @@ CommonCodeSessionFacade createDesktopSessionFacade({
   String attachedClientId = desktopSessionRuntimeAttachedClientId,
   Object? hostService,
   Object? snapshotStore,
+  Object? durableStorage,
   Object Function()? hostServiceFactory,
   Object? diagnosticsSink,
   String defaultSessionId = desktopSessionRuntimeDefaultSessionId,
@@ -25,6 +26,7 @@ CommonCodeSessionFacade createDesktopSessionFacade({
         HostCoreDesktopSessionDriver(
           hostService: hostService as HostService?,
           snapshotStore: snapshotStore as DesktopSessionSnapshotStore?,
+          durableStorage: durableStorage as DurableLocalHostStorage?,
           hostServiceFactory: hostServiceFactory == null
               ? null
               : () => hostServiceFactory() as HostService,
@@ -41,6 +43,7 @@ final class HostCoreDesktopSessionDriver implements CommonCodeSessionDriver {
   HostCoreDesktopSessionDriver({
     HostService? hostService,
     DesktopSessionSnapshotStore? snapshotStore,
+    DurableLocalHostStorage? durableStorage,
     HostService Function()? hostServiceFactory,
     DurableLocalHostDiagnosticsSink? diagnosticsSink,
     String defaultSessionId = desktopSessionRuntimeDefaultSessionId,
@@ -49,12 +52,16 @@ final class HostCoreDesktopSessionDriver implements CommonCodeSessionDriver {
   }) : _hostService = hostService,
        _legacySnapshotStore =
            snapshotStore ?? SharedPreferencesDesktopSessionSnapshotStore(),
+       _durableStorage =
+           durableStorage ?? SharedPreferencesDurableLocalHostStorage(),
        _hostServiceFactory =
            hostServiceFactory ??
            (() => DurableLocalHostService(
              legacySnapshotStore:
                  snapshotStore ??
                  SharedPreferencesDesktopSessionSnapshotStore(),
+             durableStorage:
+                 durableStorage ?? SharedPreferencesDurableLocalHostStorage(),
              diagnosticsSink: diagnosticsSink,
            )),
        _defaultSessionId = defaultSessionId,
@@ -63,6 +70,7 @@ final class HostCoreDesktopSessionDriver implements CommonCodeSessionDriver {
 
   final HostService? _hostService;
   final DesktopSessionSnapshotStore _legacySnapshotStore;
+  final DurableLocalHostStorage _durableStorage;
   final HostService Function() _hostServiceFactory;
   final String _defaultSessionId;
   final String _hostId;
