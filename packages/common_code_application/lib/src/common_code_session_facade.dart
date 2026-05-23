@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:common_code_domain/common_code_domain.dart';
 
 import 'common_code_session_observation.dart';
+import 'host_gateway.dart';
 
 final class CommonCodeSessionBinding {
   const CommonCodeSessionBinding.attached({required this.sessionId});
@@ -103,13 +104,16 @@ final class CommonCodeSessionFacade {
   CommonCodeSessionFacade({
     required CommonCodeSessionDriver driver,
     required CommonCodeSessionObservation observation,
+    required HostGateway hostGateway,
     required String attachedClientId,
   }) : _driver = driver,
        _observation = observation,
+       _hostGateway = hostGateway,
        _attachedClientId = attachedClientId;
 
   final CommonCodeSessionDriver _driver;
   final CommonCodeSessionObservation _observation;
+  final HostGateway _hostGateway;
   final String _attachedClientId;
   final StreamController<CommonCodeSessionFacadeState> _states =
       StreamController<CommonCodeSessionFacadeState>.broadcast(sync: true);
@@ -160,9 +164,9 @@ final class CommonCodeSessionFacade {
       }
 
       await Future.sync(
-        () => _driver.submitTurn(
+        () => _hostGateway.submitTurn(
           sessionId: sessionId,
-          attachedClientId: _attachedClientId,
+          client: Client(id: _attachedClientId),
           submittedText: submittedText,
         ),
       );
