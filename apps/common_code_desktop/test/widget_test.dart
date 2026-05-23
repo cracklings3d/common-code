@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 
+import 'package:common_code_application/common_code_application.dart';
 import 'package:common_code_desktop/main.dart';
 import 'package:common_code_desktop/src/desktop_session_controller.dart';
 import 'package:common_code_desktop/src/desktop_session_runtime.dart';
@@ -996,24 +997,31 @@ final class _AcknowledgeFailingRuntime implements DesktopSessionRuntime {
   _AcknowledgeFailingRuntime({required Session session}) : _session = session;
 
   final Session _session;
-  void Function(Session session)? _onSnapshot;
+  final StreamController<CommonCodeSessionFacadeState> _states =
+      StreamController<CommonCodeSessionFacadeState>.broadcast(sync: true);
+  CommonCodeSessionFacadeState _state =
+      const CommonCodeSessionFacadeState.loading();
 
   @override
   void bind({
     required void Function(Session session) onSnapshot,
     required void Function(Object error, StackTrace stackTrace) onWatchError,
-  }) {
-    _onSnapshot = onSnapshot;
-  }
+  }) {}
+
+  @override
+  Stream<CommonCodeSessionFacadeState> get states => _states.stream;
+
+  @override
+  CommonCodeSessionFacadeState get state => _state;
 
   @override
   Future<void> initialize() async {
-    _onSnapshot?.call(_session);
+    _emitSession();
   }
 
   @override
   Future<void> refresh() async {
-    _onSnapshot?.call(_session);
+    _emitSession();
   }
 
   @override
@@ -1025,5 +1033,21 @@ final class _AcknowledgeFailingRuntime implements DesktopSessionRuntime {
   Future<void> submitTurn({required String submittedText}) async {}
 
   @override
-  Future<void> dispose() async {}
+  Future<void> dispose() async {
+    await _states.close();
+  }
+
+  void _emitSession() {
+    if (_states.isClosed) {
+      return;
+    }
+
+    _state = CommonCodeSessionFacadeState.data(
+      CommonCodeSessionSnapshot(
+        session: _session,
+        attachedClientId: DesktopSessionController.attachedClientId,
+      ),
+    );
+    _states.add(_state);
+  }
 }

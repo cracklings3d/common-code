@@ -7,5 +7,6 @@ environment:
 
 workspace:
   - apps/common_code_desktop
+  - packages/common_code_application
   - packages/common_code_domain
   - packages/host_core

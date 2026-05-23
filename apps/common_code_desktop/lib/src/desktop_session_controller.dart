@@ -1,11 +1,10 @@
 import 'dart:async';
 
+import 'package:common_code_application/common_code_application.dart';
 import 'package:common_code_domain/common_code_domain.dart';
 import 'package:flutter/foundation.dart';
-import 'package:host_core/host_core.dart';
 
 import 'desktop_session_runtime.dart';
-import 'desktop_session_snapshot_store.dart';
 
 final class DesktopSessionSnapshot {
   const DesktopSessionSnapshot({
@@ -108,25 +107,16 @@ final class DesktopSessionControllerState {
 }
 
 class DesktopSessionController extends ChangeNotifier {
-  DesktopSessionController({
-    DesktopSessionRuntime? runtime,
-    HostService? hostService,
-    DesktopSessionSnapshotStore? snapshotStore,
-  }) : _runtime =
-           runtime ??
-           HostDesktopSessionRuntime(
-             hostService: hostService,
-             snapshotStore: snapshotStore,
-           ) {
-    _runtime.bind(
-      onSnapshot: _handleRuntimeSnapshot,
-      onWatchError: _handleRuntimeWatchError,
-    );
+  DesktopSessionController({DesktopSessionRuntime? runtime})
+    : _runtime = runtime ?? HostDesktopSessionRuntime() {
+    _stateSubscription = _runtime.states.listen(_handleRuntimeState);
   }
 
   static const attachedClientId = desktopSessionRuntimeAttachedClientId;
 
   final DesktopSessionRuntime _runtime;
+  late final StreamSubscription<CommonCodeSessionFacadeState>
+  _stateSubscription;
 
   DesktopSessionControllerState _state =
       const DesktopSessionControllerState.loading();
@@ -194,26 +184,26 @@ class DesktopSessionController extends ChangeNotifier {
     _emitState(_state.copyWithSubmitting(false));
   }
 
-  void _handleRuntimeSnapshot(Session session) {
-    _emitState(
-      DesktopSessionControllerState.data(
+  void _handleRuntimeState(CommonCodeSessionFacadeState state) {
+    _emitState(switch (state.status) {
+      CommonCodeSessionFacadeStatus.loading =>
+        DesktopSessionControllerState.loading(isSubmitting: state.isSubmitting),
+      CommonCodeSessionFacadeStatus.empty =>
+        DesktopSessionControllerState.empty(isSubmitting: state.isSubmitting),
+      CommonCodeSessionFacadeStatus.data => DesktopSessionControllerState.data(
         DesktopSessionSnapshot(
-          session: session,
-          attachedClientId: attachedClientId,
+          session: state.snapshot!.session,
+          attachedClientId: state.snapshot!.attachedClientId,
         ),
-        isSubmitting: _state.isSubmitting,
+        isSubmitting: state.isSubmitting,
         isAcknowledgingNotification: _state.isAcknowledgingNotification,
       ),
-    );
-  }
-
-  void _handleRuntimeWatchError(Object error, StackTrace stackTrace) {
-    _emitState(
-      DesktopSessionControllerState.error(
-        error.toString(),
-        isSubmitting: false,
-      ),
-    );
+      CommonCodeSessionFacadeStatus.error =>
+        DesktopSessionControllerState.error(
+          state.message!,
+          isSubmitting: state.isSubmitting,
+        ),
+    });
   }
 
   void _emitState(DesktopSessionControllerState state) {
@@ -228,6 +218,7 @@ class DesktopSessionController extends ChangeNotifier {
   @override
   void dispose() {
     _isDisposed = true;
+    unawaited(_stateSubscription.cancel());
     unawaited(_runtime.dispose());
     super.dispose();
   }
