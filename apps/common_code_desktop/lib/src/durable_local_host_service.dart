@@ -5,11 +5,8 @@ import 'dart:convert';
 
 import 'package:common_code_application/src/common_code_session_bootstrap.dart';
 import 'package:common_code_domain/common_code_domain.dart';
+import 'package:common_code_persistence/common_code_persistence.dart';
 import 'package:host_core/host_core.dart';
-import 'package:shared_preferences/shared_preferences.dart';
-
-import 'desktop_session_snapshot_codec.dart';
-import 'desktop_session_snapshot_store.dart';
 
 enum DurableLocalHostDiagnosticCode {
   durableReadRestored,
@@ -36,98 +33,25 @@ final class DurableLocalHostDiagnostic {
 typedef DurableLocalHostDiagnosticsSink =
     void Function(DurableLocalHostDiagnostic diagnostic);
 
-abstract interface class DurableLocalHostStorage {
-  Future<String?> readSessionPayload();
-
-  Future<void> writeSessionPayload(String payload);
-
-  Future<bool> isLegacySeedEnabled({required String desktopClientId});
-
-  Future<void> disableLegacySeed({required String desktopClientId});
-}
-
-final class SharedPreferencesDurableLocalHostStorage
-    implements DurableLocalHostStorage {
-  SharedPreferencesDurableLocalHostStorage({
-    Future<SharedPreferences> Function()? sharedPreferencesFactory,
-  }) : _sharedPreferencesFactory =
-           sharedPreferencesFactory ?? SharedPreferences.getInstance;
-
-  static const sessionStorageKey =
-      'common_code.desktop.durable_local_host.session.v1';
-  static const legacySeedMarkerKeyPrefix =
-      'common_code.desktop.durable_local_host.legacy_seed_enabled';
-
-  final Future<SharedPreferences> Function() _sharedPreferencesFactory;
-  Future<SharedPreferences>? _sharedPreferences;
-
-  @override
-  Future<void> disableLegacySeed({required String desktopClientId}) async {
-    final preferences = await _getPreferences();
-    final didPersist = await preferences.setBool(
-      _legacySeedMarkerKey(desktopClientId),
-      false,
-    );
-    if (!didPersist) {
-      throw StateError('Failed to persist the legacy seed marker.');
-    }
-  }
-
-  @override
-  Future<bool> isLegacySeedEnabled({required String desktopClientId}) async {
-    final preferences = await _getPreferences();
-    return preferences.getBool(_legacySeedMarkerKey(desktopClientId)) ?? true;
-  }
-
-  @override
-  Future<String?> readSessionPayload() async {
-    final preferences = await _getPreferences();
-    return preferences.getString(sessionStorageKey);
-  }
-
-  @override
-  Future<void> writeSessionPayload(String payload) async {
-    final preferences = await _getPreferences();
-    final didPersist = await preferences.setString(sessionStorageKey, payload);
-    if (!didPersist) {
-      throw StateError('Failed to persist the durable local session payload.');
-    }
-  }
-
-  Future<SharedPreferences> _getPreferences() {
-    return _sharedPreferences ??= _sharedPreferencesFactory();
-  }
-
-  static String legacySeedMarkerKeyFor(String desktopClientId) {
-    return _legacySeedMarkerKey(desktopClientId);
-  }
-
-  static String _legacySeedMarkerKey(String desktopClientId) {
-    return '$legacySeedMarkerKeyPrefix.$desktopClientId.v1';
-  }
-}
-
 class DurableLocalHostService implements HostService {
   DurableLocalHostService({
-    DesktopSessionSnapshotStore? legacySnapshotStore,
-    DurableLocalHostStorage? durableStorage,
-    DesktopSessionSnapshotJsonCodec codec =
-        const DesktopSessionSnapshotJsonCodec(),
+    SessionSnapshotStore? legacySnapshotStore,
+    DurableSessionStore? durableStorage,
+    SessionSnapshotCodec codec = const SessionSnapshotCodec(),
     HostExecutionSimulationPolicy simulationPolicy =
         const HostExecutionSimulationPolicy(),
     DurableLocalHostDiagnosticsSink? diagnosticsSink,
   }) : _legacySnapshotStore =
-           legacySnapshotStore ??
-           SharedPreferencesDesktopSessionSnapshotStore(),
+           legacySnapshotStore ?? SharedPreferencesSessionSnapshotStore(),
        _durableStorage =
-           durableStorage ?? SharedPreferencesDurableLocalHostStorage(),
+           durableStorage ?? SharedPreferencesDurableSessionStore(),
        _codec = codec,
        _simulationPolicy = simulationPolicy,
        _diagnosticsSink = diagnosticsSink;
 
-  final DesktopSessionSnapshotStore _legacySnapshotStore;
-  final DurableLocalHostStorage _durableStorage;
-  final DesktopSessionSnapshotJsonCodec _codec;
+  final SessionSnapshotStore _legacySnapshotStore;
+  final DurableSessionStore _durableStorage;
+  final SessionSnapshotCodec _codec;
   final HostExecutionSimulationPolicy _simulationPolicy;
   final DurableLocalHostDiagnosticsSink? _diagnosticsSink;
 

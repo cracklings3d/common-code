@@ -36,6 +36,8 @@ dependencies:
     path: ../../packages/common_code_application
   common_code_domain:
     path: ../../packages/common_code_domain
+  common_code_persistence:
+    path: ../../packages/common_code_persistence
   host_core:
     path: ../../packages/host_core
   shared_preferences: ^2.5.3

@@ -1,0 +1,9 @@
+name: common_code_persistence
+version: 0.0.1
+publish_to: 'none'
+environment:
+  sdk: '>=3.0.0 <4.0.0'
+dependencies:
+  common_code_domain:
+    path: ../common_code_domain
+  shared_preferences: ^2.2.0

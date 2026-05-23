@@ -1,10 +1,9 @@
 import 'dart:convert';
 
-import 'package:common_code_desktop/src/desktop_session_snapshot_codec.dart';
-import 'package:common_code_desktop/src/desktop_session_snapshot_store.dart';
 import 'package:common_code_desktop/src/durable_local_host_service.dart';
 import 'package:common_code_desktop/src/desktop_session_runtime.dart';
 import 'package:common_code_domain/common_code_domain.dart';
+import 'package:common_code_persistence/common_code_persistence.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
@@ -138,7 +137,7 @@ void main() {
       () async {
         final storage = _MemoryDurableStorage(
           payload: jsonEncode(
-            const DesktopSessionSnapshotJsonCodec().encode(
+            const SessionSnapshotCodec().encode(
               _runningSessionWithNotifications(),
             ),
           ),
@@ -372,7 +371,7 @@ void main() {
       final service = _RejectingRestoreDurableLocalHostService(
         durableStorage: _MemoryDurableStorage(
           payload: jsonEncode(
-            const DesktopSessionSnapshotJsonCodec().encode(_queuedSession()),
+            const SessionSnapshotCodec().encode(_queuedSession()),
           ),
         ),
         legacySnapshotStore: _MemoryLegacySnapshotStore(
@@ -442,7 +441,7 @@ void main() {
         final queuedService = DurableLocalHostService(
           durableStorage: _MemoryDurableStorage(
             payload: jsonEncode(
-              const DesktopSessionSnapshotJsonCodec().encode(_queuedSession()),
+              const SessionSnapshotCodec().encode(_queuedSession()),
             ),
           ),
           legacySnapshotStore: _MemoryLegacySnapshotStore(),
@@ -462,7 +461,7 @@ void main() {
         final runningService = DurableLocalHostService(
           durableStorage: _MemoryDurableStorage(
             payload: jsonEncode(
-              const DesktopSessionSnapshotJsonCodec().encode(
+              const SessionSnapshotCodec().encode(
                 _runningSessionWithNotifications(),
               ),
             ),
@@ -487,7 +486,7 @@ void main() {
       final notifiedService = DurableLocalHostService(
         durableStorage: _MemoryDurableStorage(
           payload: jsonEncode(
-            const DesktopSessionSnapshotJsonCodec().encode(
+            const SessionSnapshotCodec().encode(
               _runningSessionWithNotifications(),
             ),
           ),
@@ -743,7 +742,7 @@ Session _runningSessionWithNotifications() {
   );
 }
 
-final class _MemoryLegacySnapshotStore implements DesktopSessionSnapshotStore {
+final class _MemoryLegacySnapshotStore implements SessionSnapshotStore {
   _MemoryLegacySnapshotStore({this.storedSession});
 
   Session? storedSession;
@@ -757,7 +756,7 @@ final class _MemoryLegacySnapshotStore implements DesktopSessionSnapshotStore {
   Future<void> writeLatestSession(Session session) async {}
 }
 
-final class _MemoryDurableStorage implements DurableLocalHostStorage {
+final class _MemoryDurableStorage implements DurableSessionStore {
   _MemoryDurableStorage({
     this.payload,
     this.legacySeedEnabled = true,

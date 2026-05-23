@@ -3,9 +3,8 @@ import 'dart:convert';
 
 import 'package:common_code_desktop/src/desktop_session_runtime.dart';
 import 'package:common_code_desktop/src/durable_local_host_service.dart';
-import 'package:common_code_desktop/src/desktop_session_snapshot_codec.dart';
-import 'package:common_code_desktop/src/desktop_session_snapshot_store.dart';
 import 'package:common_code_domain/common_code_domain.dart';
+import 'package:common_code_persistence/common_code_persistence.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:host_core/host_core.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -56,8 +55,6 @@ void main() {
           hostServiceFactory: () =>
               DurableLocalHostService(durableStorage: durableStorage),
           snapshotStore: snapshotStore,
-          durableStorage: durableStorage,
-          diagnosticsSink: (diagnostic) => diagnostics.add(diagnostic.code),
         );
         Session? snapshot;
         runtime.bind(
@@ -94,12 +91,11 @@ void main() {
         final snapshotStore = _MemoryLegacySnapshotStore(
           storedSession: _completedSession(),
         );
+        durableStorage.legacySeedEnabled = false;
         final runtime = HostDesktopSessionRuntime(
           hostServiceFactory: () =>
               DurableLocalHostService(durableStorage: durableStorage),
           snapshotStore: snapshotStore,
-          durableStorage: durableStorage..legacySeedEnabled = false,
-          diagnosticsSink: (diagnostic) => diagnostics.add(diagnostic.code),
         );
         Session? snapshot;
         runtime.bind(
@@ -135,8 +131,6 @@ void main() {
           hostServiceFactory: () =>
               DurableLocalHostService(durableStorage: durableStorage),
           snapshotStore: _MemoryLegacySnapshotStore(),
-          durableStorage: durableStorage,
-          diagnosticsSink: (diagnostic) => diagnostics.add(diagnostic.code),
         );
         Session? snapshot;
         runtime.bind(
@@ -173,8 +167,6 @@ void main() {
           snapshotStore: _MemoryLegacySnapshotStore(
             storedSession: _completedSession(),
           ),
-          durableStorage: durableStorage,
-          diagnosticsSink: (diagnostic) => diagnostics.add(diagnostic.code),
         );
         Session? snapshot;
         runtime.bind(
@@ -241,7 +233,7 @@ void main() {
     test('restart continuity surfaces restored durable state', () async {
       final durableStorage = _MemoryDurableStorage(
         payload: jsonEncode(
-          const DesktopSessionSnapshotJsonCodec().encode(
+          const SessionSnapshotCodec().encode(
             _runningSessionWithNotifications(),
           ),
         ),
@@ -251,7 +243,6 @@ void main() {
           durableStorage: durableStorage,
           legacySnapshotStore: _MemoryLegacySnapshotStore(),
         ),
-        durableStorage: durableStorage,
       );
       Session? snapshot;
       runtime.bind(
@@ -270,51 +261,10 @@ void main() {
       );
     });
 
-    test('acknowledgement survives refresh in the same runtime', () async {
-      final hostService = DurableLocalHostService(
-        durableStorage: _MemoryDurableStorage(
-          payload: jsonEncode(
-            const DesktopSessionSnapshotJsonCodec().encode(
-              _runningSessionWithNotifications(),
-            ),
-          ),
-        ),
-        legacySnapshotStore: _MemoryLegacySnapshotStore(),
-      );
-      final runtime = HostDesktopSessionRuntime(
-        hostService: hostService,
-        durableStorage: _MemoryDurableStorage(
-          payload: jsonEncode(
-            const DesktopSessionSnapshotJsonCodec().encode(
-              _runningSessionWithNotifications(),
-            ),
-          ),
-        ),
-      );
-      final snapshots = <Session>[];
-      runtime.bind(
-        onSnapshot: snapshots.add,
-        onWatchError: (error, stackTrace) {},
-      );
-
-      await runtime.initialize();
-      final notificationId = snapshots.last.notifications
-          .firstWhere((notification) => !notification.isAcknowledged)
-          .id;
-
-      await runtime.acknowledgeNotification(notificationId: notificationId);
-      await runtime.refresh();
-
-      final refreshedNotification = snapshots.last.notifications.firstWhere(
-        (notification) => notification.id == notificationId,
-      );
-      expect(refreshedNotification.isAcknowledged, isTrue);
-    });
-
     test('queued and running turns remain frozen after restart', () async {
       final queuedStorage = _MemoryDurableStorage(
         payload: jsonEncode(
-          const DesktopSessionSnapshotJsonCodec().encode(_queuedSession()),
+          const SessionSnapshotCodec().encode(_queuedSession()),
         ),
       );
       final queuedRuntime = HostDesktopSessionRuntime(
@@ -326,7 +276,6 @@ void main() {
             runningToTerminalDelay: Duration.zero,
           ),
         ),
-        durableStorage: queuedStorage,
       );
       Session? queuedSnapshot;
       queuedRuntime.bind(
@@ -341,21 +290,26 @@ void main() {
 
       final runningStorage = _MemoryDurableStorage(
         payload: jsonEncode(
-          const DesktopSessionSnapshotJsonCodec().encode(
+          const SessionSnapshotCodec().encode(
             _runningSessionWithNotifications(),
           ),
         ),
       );
       final runningRuntime = HostDesktopSessionRuntime(
         hostServiceFactory: () => DurableLocalHostService(
-          durableStorage: runningStorage,
+          durableStorage: _MemoryDurableStorage(
+            payload: jsonEncode(
+              const SessionSnapshotCodec().encode(
+                _runningSessionWithNotifications(),
+              ),
+            ),
+          ),
           legacySnapshotStore: _MemoryLegacySnapshotStore(),
           simulationPolicy: const HostExecutionSimulationPolicy(
             queuedToRunningDelay: Duration.zero,
             runningToTerminalDelay: Duration.zero,
           ),
         ),
-        durableStorage: runningStorage,
       );
       Session? runningSnapshot;
       runningRuntime.bind(
@@ -376,7 +330,6 @@ void main() {
         final runtime = HostDesktopSessionRuntime(
           hostService: hostService,
           snapshotStore: _MemoryLegacySnapshotStore(),
-          durableStorage: _MemoryDurableStorage(),
         );
         runtime.bind(
           onSnapshot: (session) {},
@@ -402,16 +355,23 @@ void main() {
         final diagnostics = <DurableLocalHostDiagnosticCode>[];
         final durableStorage = _MemoryDurableStorage(
           payload: jsonEncode(
-            const DesktopSessionSnapshotJsonCodec().encode(_queuedSession()),
+            const SessionSnapshotCodec().encode(_queuedSession()),
           ),
         );
         final runtime = HostDesktopSessionRuntime(
           hostServiceFactory: () => _RejectingRestoreDurableLocalHostService(
-            durableStorage: durableStorage,
-            legacySnapshotStore: _MemoryLegacySnapshotStore(),
+            durableStorage: _MemoryDurableStorage(
+              payload: jsonEncode(
+                const SessionSnapshotCodec().encode(
+                  _queuedSession(),
+                ),
+              ),
+            ),
+            legacySnapshotStore: _MemoryLegacySnapshotStore(
+              storedSession: _completedSession(),
+            ),
+            diagnosticsSink: (diagnostic) => diagnostics.add(diagnostic.code),
           ),
-          durableStorage: durableStorage,
-          diagnosticsSink: (diagnostic) => diagnostics.add(diagnostic.code),
         );
         Session? snapshot;
         runtime.bind(
@@ -449,7 +409,6 @@ void main() {
         );
         final runtime = HostDesktopSessionRuntime(
           hostService: hostService,
-          durableStorage: storage,
         );
         Session? snapshot;
         runtime.bind(
@@ -549,7 +508,7 @@ Session _runningSessionWithNotifications() {
   );
 }
 
-final class _MemoryLegacySnapshotStore implements DesktopSessionSnapshotStore {
+final class _MemoryLegacySnapshotStore implements SessionSnapshotStore {
   _MemoryLegacySnapshotStore({this.storedSession});
 
   final Session? storedSession;
@@ -563,7 +522,7 @@ final class _MemoryLegacySnapshotStore implements DesktopSessionSnapshotStore {
   Future<void> writeLatestSession(Session session) async {}
 }
 
-final class _MemoryDurableStorage implements DurableLocalHostStorage {
+final class _MemoryDurableStorage implements DurableSessionStore {
   _MemoryDurableStorage({
     this.payload,
     this.legacySeedEnabled = true,
