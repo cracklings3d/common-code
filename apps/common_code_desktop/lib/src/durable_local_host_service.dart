@@ -11,6 +11,10 @@ import 'package:common_code_application/common_code_application.dart';
 import 'package:host_core/host_core.dart';
 import 'package:host_in_memory/host_in_memory.dart';
 
+// Re-export diagnostics types for backwards compatibility with consumers
+// that import from DurableLocalHostService.
+export 'package:common_code_observability/common_code_observability.dart';
+
 class DurableLocalHostService implements HostService {
   /// Creates a [DurableLocalHostService] with an injected [hostAdapter].
   ///
