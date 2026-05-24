@@ -7,9 +7,5 @@ environment:
 
 resolution: workspace
 
-dependencies:
-  common_code_domain:
-    path: ../common_code_domain
-
 dev_dependencies:
   lints: ^6.0.0
