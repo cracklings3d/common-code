@@ -13,6 +13,8 @@ dependencies:
     path: ../common_code_application
   common_code_domain:
     path: ../common_code_domain
+  host_in_memory:
+    path: ../host_in_memory
 
 dev_dependencies:
   lints: ^6.0.0

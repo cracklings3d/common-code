@@ -7,7 +7,7 @@ import 'package:common_code_domain/common_code_domain.dart';
 import 'package:common_code_persistence/common_code_persistence.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:common_code_application/common_code_application.dart';
-import 'package:host_core/host_core.dart';
+import 'package:host_in_memory/host_in_memory.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 void main() {

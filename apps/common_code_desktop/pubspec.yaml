@@ -40,6 +40,8 @@ dependencies:
     path: ../../packages/common_code_persistence
   host_core:
     path: ../../packages/host_core
+  host_in_memory:
+    path: ../../packages/host_in_memory
   shared_preferences: ^2.5.3
 
 dev_dependencies:

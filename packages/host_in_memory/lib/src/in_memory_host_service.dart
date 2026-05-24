@@ -1,9 +1,7 @@
 import 'dart:async';
 
 import 'package:common_code_domain/common_code_domain.dart';
-
-import 'host_service.dart';
-import 'package:common_code_application/common_code_application.dart';
+import 'package:host_core/host_core.dart';
 
 enum SimulatedTurnTerminalOutcome { completed, failed }
 
@@ -54,44 +52,6 @@ final class _InMemoryHostService implements HostService {
   Session attachClient({required String sessionId, required Client client}) {
     final session = _readStoredSession(sessionId);
     final updatedSession = session.attachClient(client);
-    _persistSession(sessionId, updatedSession);
-    return updatedSession;
-  }
-
-  @override
-  Session acknowledgeNotification({
-    required String sessionId,
-    required String notificationId,
-  }) {
-    final session = _readStoredSession(sessionId);
-    var didAcknowledge = false;
-    final updatedNotifications = [
-      for (final notification in session.notifications)
-        if (notification.id == notificationId && !notification.isAcknowledged)
-          () {
-            didAcknowledge = true;
-            return SessionNotification.forTransition(
-              sessionId: session.id,
-              turnId: notification.turnId,
-              transition: notification.transition,
-              isAcknowledged: true,
-            );
-          }()
-        else
-          notification,
-    ];
-
-    if (!didAcknowledge) {
-      return session;
-    }
-
-    final updatedSession = Session(
-      id: session.id,
-      activeHost: session.activeHost,
-      clients: session.clients,
-      promptThread: session.promptThread,
-      notifications: updatedNotifications,
-    );
     _persistSession(sessionId, updatedSession);
     return updatedSession;
   }
