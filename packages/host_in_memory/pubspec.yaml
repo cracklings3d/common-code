@@ -1,0 +1,10 @@
+name: host_in_memory
+version: 1.0.0
+publish_to: none
+environment:
+  sdk: '>=3.0.0 <4.0.0'
+dependencies:
+  common_code_domain:
+    path: ../common_code_domain
+  host_core:
+    path: ../host_core
