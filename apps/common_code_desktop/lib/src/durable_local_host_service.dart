@@ -8,6 +8,7 @@ import 'package:common_code_domain/common_code_domain.dart';
 import 'package:common_code_persistence/common_code_persistence.dart';
 import 'package:common_code_application/common_code_application.dart';
 import 'package:host_core/host_core.dart';
+import 'package:host_in_memory/host_in_memory.dart';
 
 enum DurableLocalHostDiagnosticCode {
   durableReadRestored,
@@ -35,6 +36,30 @@ typedef DurableLocalHostDiagnosticsSink =
     void Function(DurableLocalHostDiagnostic diagnostic);
 
 class DurableLocalHostService implements HostService {
+  /// Creates a [DurableLocalHostService] with an injected [hostAdapter].
+  ///
+  /// Use this factory for new composition code.
+  factory DurableLocalHostService.withAdapter({
+    required InMemoryHostAdapter hostAdapter,
+    SessionSnapshotStore? legacySnapshotStore,
+    DurableSessionStore? durableStorage,
+    SessionSnapshotCodec codec = const SessionSnapshotCodec(),
+    DurableLocalHostDiagnosticsSink? diagnosticsSink,
+  }) {
+    return DurableLocalHostService._(
+      hostAdapter: hostAdapter,
+      legacySnapshotStore:
+          legacySnapshotStore ?? SharedPreferencesSessionSnapshotStore(),
+      durableStorage:
+          durableStorage ?? SharedPreferencesDurableSessionStore(),
+      codec: codec,
+      diagnosticsSink: diagnosticsSink,
+    );
+  }
+
+  /// Creates a [DurableLocalHostService] with an internal [InMemoryHostAdapter].
+  ///
+  /// For backward compatibility with existing tests and composition.
   DurableLocalHostService({
     SessionSnapshotStore? legacySnapshotStore,
     DurableSessionStore? durableStorage,
@@ -42,23 +67,31 @@ class DurableLocalHostService implements HostService {
     HostExecutionSimulationPolicy simulationPolicy =
         const HostExecutionSimulationPolicy(),
     DurableLocalHostDiagnosticsSink? diagnosticsSink,
-  }) : _legacySnapshotStore =
+  }) : _hostAdapter = InMemoryHostAdapter(simulationPolicy: simulationPolicy),
+       _legacySnapshotStore =
            legacySnapshotStore ?? SharedPreferencesSessionSnapshotStore(),
        _durableStorage =
            durableStorage ?? SharedPreferencesDurableSessionStore(),
        _codec = codec,
-       _simulationPolicy = simulationPolicy,
        _diagnosticsSink = diagnosticsSink;
 
+  DurableLocalHostService._({
+    required InMemoryHostAdapter hostAdapter,
+    required SessionSnapshotStore legacySnapshotStore,
+    required DurableSessionStore durableStorage,
+    required SessionSnapshotCodec codec,
+    required DurableLocalHostDiagnosticsSink? diagnosticsSink,
+  }) : _hostAdapter = hostAdapter,
+       _legacySnapshotStore = legacySnapshotStore,
+       _durableStorage = durableStorage,
+       _codec = codec,
+       _diagnosticsSink = diagnosticsSink;
+
+  final InMemoryHostAdapter _hostAdapter;
   final SessionSnapshotStore _legacySnapshotStore;
   final DurableSessionStore _durableStorage;
   final SessionSnapshotCodec _codec;
-  final HostExecutionSimulationPolicy _simulationPolicy;
   final DurableLocalHostDiagnosticsSink? _diagnosticsSink;
-
-  final Map<String, Session> _sessionsById = <String, Session>{};
-  final Map<String, StreamController<Session>> _sessionWatchControllersById =
-      <String, StreamController<Session>>{};
 
   Future<void> _writeSequence = Future<void>.value();
   String? _bootstrappedSessionId;
@@ -199,7 +232,7 @@ class DurableLocalHostService implements HostService {
   }
 
   Session readBootstrappedSession() {
-    return readSession(_bootstrappedSessionId!);
+    return _hostAdapter.readSession(_bootstrappedSessionId!);
   }
 
   Future<Session> restoreLegacySeededSession({
@@ -210,11 +243,10 @@ class DurableLocalHostService implements HostService {
     var emittedLegacySeedFailure = false;
 
     try {
-      final restoredSession = _restoreSession(session: session);
+      final restoredSession = _hostAdapter.restoreSession(session);
       try {
         await _persistBootstrapSession(restoredSession);
       } catch (error, stackTrace) {
-        _sessionsById.remove(restoredSession.id);
         _emit(
           DurableLocalHostDiagnostic(
             DurableLocalHostDiagnosticCode.legacySeedFailed,
@@ -250,7 +282,7 @@ class DurableLocalHostService implements HostService {
 
   Session restoreDurableSession(Session session) {
     try {
-      final restoredSession = restoreBootstrappedSession(session);
+      final restoredSession = _hostAdapter.restoreSession(session);
       _bootstrappedSessionId = restoredSession.id;
       _isBootstrapped = true;
       _emit(
@@ -273,10 +305,12 @@ class DurableLocalHostService implements HostService {
 
   @override
   Session attachClient({required String sessionId, required Client client}) {
-    final session = _readStoredSession(sessionId);
-    final updatedSession = session.attachClient(client);
-    _persistSession(sessionId, updatedSession);
-    return updatedSession;
+    final session = _hostAdapter.attachClient(
+      sessionId: sessionId,
+      client: client,
+    );
+    _enqueueDurableWrite(session);
+    return session;
   }
 
   @override
@@ -284,59 +318,32 @@ class DurableLocalHostService implements HostService {
     required String sessionId,
     required String notificationId,
   }) {
-    final session = _readStoredSession(sessionId);
-    var didAcknowledge = false;
-    final updatedNotifications = [
-      for (final notification in session.notifications)
-        if (notification.id == notificationId && !notification.isAcknowledged)
-          () {
-            didAcknowledge = true;
-            return SessionNotification.forTransition(
-              sessionId: session.id,
-              turnId: notification.turnId,
-              transition: notification.transition,
-              isAcknowledged: true,
-            );
-          }()
-        else
-          notification,
-    ];
-
-    if (!didAcknowledge) {
-      return session;
-    }
-
-    final updatedSession = Session(
-      id: session.id,
-      activeHost: session.activeHost,
-      clients: session.clients,
-      promptThread: session.promptThread,
-      notifications: updatedNotifications,
+    final session = _hostAdapter.acknowledgeNotification(
+      sessionId: sessionId,
+      notificationId: notificationId,
     );
-    _persistSession(sessionId, updatedSession);
-    return updatedSession;
-  }
-
-  @override
-  Session createSession({required String sessionId, required Host activeHost}) {
-    if (_sessionsById.containsKey(sessionId)) {
-      throw HostServiceFailure(
-        HostServiceFailureCode.duplicateSessionId,
-        'Session $sessionId already exists.',
-      );
-    }
-
-    final session = Session(id: sessionId, activeHost: activeHost);
-    _persistSession(sessionId, session);
+    _enqueueDurableWrite(session);
     return session;
   }
 
   @override
-  Session readSession(String sessionId) => _readStoredSession(sessionId);
+  Session createSession({required String sessionId, required Host activeHost}) {
+    final session = _hostAdapter.createSession(
+      sessionId: sessionId,
+      activeHost: activeHost,
+    );
+    _enqueueDurableWrite(session);
+    return session;
+  }
+
+  @override
+  Session readSession(String sessionId) => _hostAdapter.readSession(sessionId);
 
   @override
   Session restoreSession(Session session) {
-    return _restoreSession(session: session, scheduleDurableWrite: true);
+    final restored = _hostAdapter.restoreSession(session);
+    _enqueueDurableWrite(restored);
+    return restored;
   }
 
   @override
@@ -345,44 +352,18 @@ class DurableLocalHostService implements HostService {
     required Client client,
     required String submittedText,
   }) {
-    final session = _readStoredSession(sessionId);
-    final updatedSession = session.startTurn(
-      turnId: _nextTurnId(session),
+    final session = _hostAdapter.submitTurn(
+      sessionId: sessionId,
       client: client,
       submittedText: submittedText,
     );
-    _persistSession(sessionId, updatedSession);
-    _scheduleSimulatedExecution(
-      sessionId: sessionId,
-      turnId: updatedSession.activeTurn!.id,
-    );
-    return updatedSession;
+    _enqueueDurableWrite(session);
+    return session;
   }
 
   @override
   Stream<Session> watchSession(String sessionId) {
-    _readStoredSession(sessionId);
-
-    if (_sessionWatchControllersById.containsKey(sessionId)) {
-      throw HostServiceFailure(
-        HostServiceFailureCode.activeSessionWatchAlreadyExists,
-        'Session $sessionId already has an active watch.',
-      );
-    }
-
-    late final StreamController<Session> controller;
-    controller = StreamController<Session>(
-      sync: true,
-      onListen: () {
-        _sessionWatchControllersById[sessionId] = controller;
-        controller.add(_readStoredSession(sessionId));
-      },
-      onCancel: () {
-        _sessionWatchControllersById.remove(sessionId);
-      },
-    );
-
-    return controller.stream;
+    return _hostAdapter.watchSession(sessionId);
   }
 
   Future<Session> _createFreshSession({
@@ -396,11 +377,11 @@ class DurableLocalHostService implements HostService {
       ),
     );
 
-    final createdSession = createSession(
+    final createdSession = _hostAdapter.createSession(
       sessionId: defaultSessionId,
       activeHost: Host(id: hostId),
     );
-    final attachedSession = attachClient(
+    final attachedSession = _hostAdapter.attachClient(
       sessionId: createdSession.id,
       client: Client(id: desktopClientId),
     );
@@ -434,102 +415,6 @@ class DurableLocalHostService implements HostService {
           );
         });
   }
-
-  void _persistSession(String sessionId, Session session) {
-    _sessionsById[sessionId] = session;
-    _sessionWatchControllersById[sessionId]?.add(session);
-    _enqueueDurableWrite(session);
-  }
-
-  Session _readStoredSession(String sessionId) {
-    final session = _sessionsById[sessionId];
-    if (session == null) {
-      throw HostServiceFailure(
-        HostServiceFailureCode.unknownSessionId,
-        'Session $sessionId does not exist.',
-      );
-    }
-
-    return session;
-  }
-
-  Session _restoreSession({
-    required Session session,
-    bool scheduleDurableWrite = false,
-  }) {
-    if (_sessionsById.containsKey(session.id)) {
-      throw HostServiceFailure(
-        HostServiceFailureCode.duplicateSessionId,
-        'Session ${session.id} already exists.',
-      );
-    }
-
-    _sessionsById[session.id] = session;
-    if (scheduleDurableWrite) {
-      _enqueueDurableWrite(session);
-    }
-    return session;
-  }
-
-  Session restoreBootstrappedSession(Session session) {
-    return _restoreSession(session: session);
-  }
-
-  void _scheduleSimulatedExecution({
-    required String sessionId,
-    required String turnId,
-  }) {
-    Timer(_simulationPolicy.queuedToRunningDelay, () {
-      final runningSession = _advanceTurnIfStillActive(
-        sessionId: sessionId,
-        turnId: turnId,
-        expectedStatus: TurnStatus.queued,
-        update: (session) => session.advanceActiveTurnToRunning(),
-      );
-
-      if (runningSession == null) {
-        return;
-      }
-
-      Timer(_simulationPolicy.runningToTerminalDelay, () {
-        _advanceTurnIfStillActive(
-          sessionId: sessionId,
-          turnId: turnId,
-          expectedStatus: TurnStatus.running,
-          update: (session) => switch (_simulationPolicy.terminalOutcome) {
-            SimulatedTurnTerminalOutcome.completed =>
-              session.completeActiveTurn(),
-            SimulatedTurnTerminalOutcome.failed => session.failActiveTurn(
-              failureSummary: _simulationPolicy.failureSummary,
-            ),
-          },
-        );
-      });
-    });
-  }
-
-  Session? _advanceTurnIfStillActive({
-    required String sessionId,
-    required String turnId,
-    required TurnStatus expectedStatus,
-    required Session Function(Session session) update,
-  }) {
-    final session = _sessionsById[sessionId];
-    final currentTurn = session?.activeTurn;
-    if (session == null ||
-        currentTurn == null ||
-        currentTurn.id != turnId ||
-        currentTurn.status != expectedStatus) {
-      return null;
-    }
-
-    final updatedSession = update(session);
-    _persistSession(sessionId, updatedSession);
-    return updatedSession;
-  }
-
-  String _nextTurnId(Session session) =>
-      'turn-${session.promptThread.turns.length + 1}';
 
   Future<void> _persistBootstrapSession(Session session) async {
     try {
