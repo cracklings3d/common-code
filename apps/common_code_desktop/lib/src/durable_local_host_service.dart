@@ -5,35 +5,11 @@ import 'dart:convert';
 
 import 'package:common_code_application/src/common_code_session_bootstrap.dart';
 import 'package:common_code_domain/common_code_domain.dart';
+import 'package:common_code_observability/common_code_observability.dart';
 import 'package:common_code_persistence/common_code_persistence.dart';
 import 'package:common_code_application/common_code_application.dart';
 import 'package:host_core/host_core.dart';
 import 'package:host_in_memory/host_in_memory.dart';
-
-enum DurableLocalHostDiagnosticCode {
-  durableReadRestored,
-  durableReadMissing,
-  durableReadCorruptOrInvalid,
-  durableReadFailed,
-  legacySeedActivated,
-  legacySeedSkipped,
-  legacySeedSucceeded,
-  legacySeedFailed,
-  durableRestoreFailed,
-  durableWriteFailed,
-  freshBootstrapActivated,
-}
-
-final class DurableLocalHostDiagnostic {
-  const DurableLocalHostDiagnostic(this.code, {this.error, this.stackTrace});
-
-  final DurableLocalHostDiagnosticCode code;
-  final Object? error;
-  final StackTrace? stackTrace;
-}
-
-typedef DurableLocalHostDiagnosticsSink =
-    void Function(DurableLocalHostDiagnostic diagnostic);
 
 class DurableLocalHostService implements HostService {
   /// Creates a [DurableLocalHostService] with an injected [hostAdapter].
