@@ -3,7 +3,7 @@ import 'dart:async';
 import 'package:common_code_domain/common_code_domain.dart';
 
 import 'host_service.dart';
-import 'host_service_failure.dart';
+import 'package:common_code_application/common_code_application.dart';
 
 enum SimulatedTurnTerminalOutcome { completed, failed }
 

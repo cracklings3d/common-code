@@ -9,6 +9,8 @@ environment:
 resolution: workspace
 
 dependencies:
+  common_code_application:
+    path: ../common_code_application
   common_code_domain:
     path: ../common_code_domain
 

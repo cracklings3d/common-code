@@ -6,6 +6,7 @@ import 'dart:convert';
 import 'package:common_code_application/src/common_code_session_bootstrap.dart';
 import 'package:common_code_domain/common_code_domain.dart';
 import 'package:common_code_persistence/common_code_persistence.dart';
+import 'package:common_code_application/common_code_application.dart';
 import 'package:host_core/host_core.dart';
 
 enum DurableLocalHostDiagnosticCode {
