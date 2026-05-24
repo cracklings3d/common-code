@@ -1,5 +1,5 @@
 name: common_code_application
-description: CommonCode application facade for session coordination.
+description: Shared CommonCode application-level types including host-facing failure categories.
 version: 1.0.0
 publish_to: none
 

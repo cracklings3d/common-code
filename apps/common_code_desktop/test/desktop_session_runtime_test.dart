@@ -6,6 +6,7 @@ import 'package:common_code_desktop/src/durable_local_host_service.dart';
 import 'package:common_code_domain/common_code_domain.dart';
 import 'package:common_code_persistence/common_code_persistence.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:common_code_application/common_code_application.dart';
 import 'package:host_core/host_core.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
