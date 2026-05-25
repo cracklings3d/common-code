@@ -1,7 +1,7 @@
 import 'dart:async';
 
 import 'package:common_code_domain/common_code_domain.dart';
-import 'package:common_code_observability/common_code_observability.dart';
+import 'package:flutter/foundation.dart';
 import 'package:host_core/host_core.dart';
 
 import 'package:common_code_persistence/common_code_persistence.dart';
@@ -10,7 +10,20 @@ import 'durable_local_host_service.dart';
 
 const desktopSessionRuntimeDefaultSessionId = 'desktop-session';
 const desktopSessionRuntimeHostId = 'desktop-host';
+const desktopSessionRuntimeIdentityId = 'desktop-identity';
 const desktopSessionRuntimeAttachedClientId = 'desktop-client';
+
+final class _RuntimeSessionContext {
+  const _RuntimeSessionContext({
+    required this.sessionId,
+    required this.identity,
+    required this.attachedClientId,
+  });
+
+  final String sessionId;
+  final Identity identity;
+  final String attachedClientId;
+}
 
 abstract interface class DesktopSessionRuntime {
   void bind({
@@ -38,7 +51,7 @@ final class HostDesktopSessionRuntime implements DesktopSessionRuntime {
     String attachedClientId = desktopSessionRuntimeAttachedClientId,
   }) : _hostService = hostService,
        _legacySnapshotStore =
-            snapshotStore ?? SharedPreferencesSessionSnapshotStore(),
+           snapshotStore ?? SharedPreferencesSessionSnapshotStore(),
        _hostServiceFactory =
            hostServiceFactory ??
            (() => DurableLocalHostService(
@@ -65,7 +78,23 @@ final class HostDesktopSessionRuntime implements DesktopSessionRuntime {
   bool _isBootstrapped = false;
   bool _isDisposed = false;
   String? _currentSessionId;
+  _RuntimeSessionContext? _currentSessionContext;
   int _watchGeneration = 0;
+
+  @visibleForTesting
+  ({String sessionId, Identity identity, String attachedClientId})?
+  get debugSessionContext {
+    final context = _currentSessionContext;
+    if (context == null) {
+      return null;
+    }
+
+    return (
+      sessionId: context.sessionId,
+      identity: context.identity,
+      attachedClientId: context.attachedClientId,
+    );
+  }
 
   @override
   void bind({
@@ -85,11 +114,11 @@ final class HostDesktopSessionRuntime implements DesktopSessionRuntime {
   @override
   Future<void> submitTurn({required String submittedText}) async {
     final service = _service ??= _hostService ?? _hostServiceFactory();
-    await _bootstrapIfNeeded();
+    final context = await _ensureSessionContext();
 
     service.submitTurn(
-      sessionId: _currentSessionId!,
-      client: Client(id: _attachedClientId),
+      sessionId: context.sessionId,
+      client: Client(id: context.attachedClientId),
       submittedText: submittedText,
     );
   }
@@ -123,13 +152,13 @@ final class HostDesktopSessionRuntime implements DesktopSessionRuntime {
 
     try {
       final service = _service ??= _hostService ?? _hostServiceFactory();
-      await _bootstrapIfNeeded();
+      final context = await _ensureSessionContext();
 
       if (_isStaleGeneration(generation)) {
         return;
       }
 
-      final watchStream = service.watchSession(_currentSessionId!);
+      final watchStream = service.watchSession(context.sessionId);
       _watchSubscription = watchStream.listen(
         (session) {
           if (_isStaleGeneration(generation)) {
@@ -162,6 +191,23 @@ final class HostDesktopSessionRuntime implements DesktopSessionRuntime {
         firstOutcomeSettled.complete();
       }
     }
+  }
+
+  Future<_RuntimeSessionContext> _ensureSessionContext() async {
+    final existingContext = _currentSessionContext;
+    if (existingContext != null) {
+      return existingContext;
+    }
+
+    await _bootstrapIfNeeded();
+
+    final context = _RuntimeSessionContext(
+      sessionId: _currentSessionId!,
+      identity: const Identity(id: desktopSessionRuntimeIdentityId),
+      attachedClientId: _attachedClientId,
+    );
+    _currentSessionContext = context;
+    return context;
   }
 
   Future<void> _bootstrapIfNeeded() async {

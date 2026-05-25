@@ -1,20 +1,13 @@
 import 'dart:async';
 import 'dart:convert';
 
-import 'package:common_code_desktop/src/desktop_session_runtime.dart'
-    hide
-        desktopSessionRuntimeAttachedClientId,
-        desktopSessionRuntimeDefaultSessionId;
-import 'package:common_code_desktop/src/desktop_session_app_edge_composition.dart';
+import 'package:common_code_desktop/src/desktop_session_runtime.dart';
 import 'package:common_code_desktop/src/durable_local_host_service.dart';
 import 'package:common_code_domain/common_code_domain.dart';
 import 'package:common_code_persistence/common_code_persistence.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:common_code_application/common_code_application.dart';
 import 'package:host_core/host_core.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-
-import 'package:common_code_desktop/src/desktop_session_runtime_constants.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -269,6 +262,75 @@ void main() {
     });
 
     test(
+      'watch path establishes cached identity context before subscription',
+      () async {
+        final hostService = _TrackingHostService();
+        late HostDesktopSessionRuntime runtime;
+        hostService.onWatchSession = () {
+          final context = runtime.debugSessionContext;
+          expect(context, isNotNull);
+          expect(context!.sessionId, 'restored-session');
+          expect(
+            context.identity,
+            const Identity(id: desktopSessionRuntimeIdentityId),
+          );
+          expect(
+            context.attachedClientId,
+            desktopSessionRuntimeAttachedClientId,
+          );
+        };
+        runtime = HostDesktopSessionRuntime(
+          hostService: hostService,
+          snapshotStore: _MemoryLegacySnapshotStore(
+            storedSession: _completedSession(),
+          ),
+        );
+        runtime.bind(
+          onSnapshot: (session) {},
+          onWatchError: (error, stackTrace) {},
+        );
+
+        await runtime.initialize();
+
+        expect(runtime.debugSessionContext, (
+          sessionId: 'restored-session',
+          identity: const Identity(id: desktopSessionRuntimeIdentityId),
+          attachedClientId: desktopSessionRuntimeAttachedClientId,
+        ));
+      },
+    );
+
+    test(
+      'submit reuses the cached session context from watch bootstrap',
+      () async {
+        final hostService = _TrackingHostService();
+        final runtime = HostDesktopSessionRuntime(
+          hostService: hostService,
+          snapshotStore: _MemoryLegacySnapshotStore(
+            storedSession: _completedSession(),
+          ),
+        );
+        runtime.bind(
+          onSnapshot: (session) {},
+          onWatchError: (error, stackTrace) {},
+        );
+
+        await runtime.initialize();
+        final initialContext = runtime.debugSessionContext;
+
+        await runtime.submitTurn(submittedText: 'reuse cached context');
+
+        expect(runtime.debugSessionContext, initialContext);
+        expect(hostService.restoreCalls, 1);
+        expect(hostService.lastSubmittedSessionId, initialContext!.sessionId);
+        expect(
+          hostService.lastSubmittedClientId,
+          initialContext.attachedClientId,
+        );
+      },
+    );
+
+    test(
       'refresh cancels the prior watch before starting replacement watch',
       () async {
         final hostService = _TrackingHostService();
@@ -298,11 +360,6 @@ void main() {
       'runtime emits durable restore failure diagnostics for fallback branch',
       () async {
         final diagnostics = <DurableLocalHostDiagnosticCode>[];
-        final durableStorage = _MemoryDurableStorage(
-          payload: jsonEncode(
-            const SessionSnapshotCodec().encode(_queuedSession()),
-          ),
-        );
         final runtime = HostDesktopSessionRuntime(
           hostServiceFactory: () => _RejectingRestoreDurableLocalHostService(
             durableStorage: _MemoryDurableStorage(
@@ -372,25 +429,6 @@ void main() {
           diagnostics,
           contains(DurableLocalHostDiagnosticCode.durableWriteFailed),
         );
-      },
-    );
-
-    test(
-      'app-edge driver returns bound identity and attached client',
-      () async {
-        final driver = HostCoreDesktopSessionDriver(
-          hostService: _TrackingHostService(),
-          snapshotStore: _MemoryLegacySnapshotStore(),
-        );
-
-        final binding = await driver.ensureSession();
-
-        expect(binding.sessionId, desktopSessionRuntimeDefaultSessionId);
-        expect(
-          binding.identity,
-          const Identity(id: desktopSessionRuntimeIdentityId),
-        );
-        expect(binding.attachedClientId, desktopSessionRuntimeAttachedClientId);
       },
     );
   });
@@ -538,6 +576,9 @@ final class _TrackingHostService implements HostService {
   int watchStarts = 0;
   int watchCancels = 0;
   bool concurrentWatchViolation = false;
+  void Function()? onWatchSession;
+  String? lastSubmittedSessionId;
+  String? lastSubmittedClientId;
 
   @override
   Session acknowledgeNotification({
@@ -613,6 +654,8 @@ final class _TrackingHostService implements HostService {
     required Client client,
     required String submittedText,
   }) {
+    lastSubmittedSessionId = sessionId;
+    lastSubmittedClientId = client.id;
     final updated = _sessions[sessionId]!.startTurn(
       turnId: 'turn-1',
       client: client,
@@ -625,6 +668,7 @@ final class _TrackingHostService implements HostService {
 
   @override
   Stream<Session> watchSession(String sessionId) {
+    onWatchSession?.call();
     if (_controllers.containsKey(sessionId)) {
       concurrentWatchViolation = true;
       throw const HostServiceFailure(
@@ -659,7 +703,7 @@ final class _RejectingRestoreDurableLocalHostService
   });
 
   @override
-  Session restoreBootstrappedSession(Session session) {
+  Session restoreDurableSession(Session session) {
     throw StateError('restore rejected');
   }
 }
