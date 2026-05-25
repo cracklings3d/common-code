@@ -6,12 +6,15 @@ import 'package:host_core/host_core.dart';
 
 import 'package:common_code_persistence/common_code_persistence.dart';
 
-import 'durable_local_host_service.dart';
+export 'desktop_session_runtime_constants.dart'
+    show
+        desktopSessionRuntimeAttachedClientId,
+        desktopSessionRuntimeDefaultSessionId,
+        desktopSessionRuntimeHostId,
+        desktopSessionRuntimeIdentityId;
 
-const desktopSessionRuntimeDefaultSessionId = 'desktop-session';
-const desktopSessionRuntimeHostId = 'desktop-host';
-const desktopSessionRuntimeIdentityId = 'desktop-identity';
-const desktopSessionRuntimeAttachedClientId = 'desktop-client';
+import 'desktop_session_runtime_constants.dart';
+import 'durable_local_host_service.dart';
 
 final class _RuntimeSessionContext {
   const _RuntimeSessionContext({
