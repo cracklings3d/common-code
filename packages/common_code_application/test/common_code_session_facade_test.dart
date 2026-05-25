@@ -17,7 +17,7 @@ void main() {
         driver: driver,
         observation: observation,
         hostGateway: hostGateway,
-        attachedClientId: 'desktop-client',
+        attachedClientId: 'unused-constructor-client',
       );
       observation.injectDriver(driver);
 
@@ -33,6 +33,7 @@ void main() {
       expect(facade.state.status, CommonCodeSessionFacadeStatus.data);
       expect(facade.state.snapshot!.session.id, 'desktop-session');
       expect(facade.state.snapshot!.attachedClientId, 'desktop-client');
+      expect(driver.binding.identity, const Identity(id: 'desktop-identity'));
 
       await facade.dispose();
     });
@@ -47,7 +48,7 @@ void main() {
         driver: driver,
         observation: observation,
         hostGateway: hostGateway,
-        attachedClientId: 'desktop-client',
+        attachedClientId: 'unused-constructor-client',
       );
       observation.injectDriver(driver);
 
@@ -66,7 +67,7 @@ void main() {
         driver: driver,
         observation: observation,
         hostGateway: hostGateway,
-        attachedClientId: 'desktop-client',
+        attachedClientId: 'unused-constructor-client',
       );
       observation.injectDriver(driver);
 
@@ -86,37 +87,42 @@ void main() {
       await facade.dispose();
     });
 
-    test('submit keeps submission state until completion', () async {
-      final driver = _FakeCommonCodeSessionDriver();
-      final observation = _FakeObservation();
-      final hostGateway = _FakeHostGateway(driver: driver);
-      final facade = CommonCodeSessionFacade(
-        driver: driver,
-        observation: observation,
-        hostGateway: hostGateway,
-        attachedClientId: 'desktop-client',
-      );
-      observation.injectDriver(driver);
+    test(
+      'submit reuses cached binding attached client for host routing',
+      () async {
+        final driver = _FakeCommonCodeSessionDriver();
+        final observation = _FakeObservation();
+        final hostGateway = _FakeHostGateway(driver: driver);
+        final facade = CommonCodeSessionFacade(
+          driver: driver,
+          observation: observation,
+          hostGateway: hostGateway,
+          attachedClientId: 'unused-constructor-client',
+        );
+        observation.injectDriver(driver);
 
-      final initializeFuture = facade.initialize();
-      await Future<void>.delayed(Duration.zero);
-      driver.emitSession(_bootstrapSession());
-      await initializeFuture;
+        final initializeFuture = facade.initialize();
+        await Future<void>.delayed(Duration.zero);
+        driver.emitSession(_bootstrapSession());
+        await initializeFuture;
 
-      final submitFuture = facade.submitTurn(submittedText: 'queued turn');
-      await Future<void>.delayed(Duration.zero);
+        final submitFuture = facade.submitTurn(submittedText: 'queued turn');
+        await Future<void>.delayed(Duration.zero);
 
-      expect(facade.state.isSubmitting, isTrue);
-      expect(driver.submittedTexts, ['queued turn']);
+        expect(facade.state.isSubmitting, isTrue);
+        expect(driver.ensureSessionCalls, 1);
+        expect(driver.submittedTexts, ['queued turn']);
+        expect(hostGateway.submittedClientIds, ['desktop-client']);
 
-      driver.completeSubmit();
-      await submitFuture;
+        driver.completeSubmit();
+        await submitFuture;
 
-      expect(facade.state.isSubmitting, isFalse);
-      expect(facade.state.status, CommonCodeSessionFacadeStatus.data);
+        expect(facade.state.isSubmitting, isFalse);
+        expect(facade.state.status, CommonCodeSessionFacadeStatus.data);
 
-      await facade.dispose();
-    });
+        await facade.dispose();
+      },
+    );
 
     test('submit failure emits renderable error state', () async {
       final driver = _FakeCommonCodeSessionDriver()
@@ -127,7 +133,7 @@ void main() {
         driver: driver,
         observation: observation,
         hostGateway: hostGateway,
-        attachedClientId: 'desktop-client',
+        attachedClientId: 'unused-constructor-client',
       );
       observation.injectDriver(driver);
 
@@ -157,7 +163,7 @@ void main() {
         driver: driver,
         observation: observation,
         hostGateway: hostGateway,
-        attachedClientId: 'desktop-client',
+        attachedClientId: 'unused-constructor-client',
       );
       observation.injectDriver(driver);
 
@@ -379,6 +385,8 @@ final class _FakeCommonCodeSessionDriver implements CommonCodeSessionDriver {
   _FakeCommonCodeSessionDriver({
     this.binding = const CommonCodeSessionBinding.attached(
       sessionId: 'desktop-session',
+      identity: Identity(id: 'desktop-identity'),
+      attachedClientId: 'desktop-client',
     ),
   });
 
@@ -480,9 +488,10 @@ final class _FakeObservation implements CommonCodeSessionObservation {
 
 final class _FakeHostGateway implements HostGateway {
   _FakeHostGateway({required CommonCodeSessionDriver driver})
-      : _driver = driver;
+    : _driver = driver;
 
   final CommonCodeSessionDriver _driver;
+  final List<String> submittedClientIds = <String>[];
 
   @override
   Future<void> submitTurn({
@@ -490,6 +499,7 @@ final class _FakeHostGateway implements HostGateway {
     required Client client,
     required String submittedText,
   }) async {
+    submittedClientIds.add(client.id);
     await _driver.submitTurn(
       sessionId: sessionId,
       attachedClientId: client.id,

@@ -6,11 +6,20 @@ import 'common_code_session_observation.dart';
 import 'host_gateway.dart';
 
 final class CommonCodeSessionBinding {
-  const CommonCodeSessionBinding.attached({required this.sessionId});
+  const CommonCodeSessionBinding.attached({
+    required this.sessionId,
+    required this.identity,
+    required this.attachedClientId,
+  });
 
-  const CommonCodeSessionBinding.empty() : sessionId = null;
+  const CommonCodeSessionBinding.empty()
+    : sessionId = null,
+      identity = null,
+      attachedClientId = null;
 
   final String? sessionId;
+  final Identity? identity;
+  final String? attachedClientId;
 
   bool get hasSession => sessionId != null;
 }
@@ -108,13 +117,11 @@ final class CommonCodeSessionFacade {
     required String attachedClientId,
   }) : _driver = driver,
        _observation = observation,
-       _hostGateway = hostGateway,
-       _attachedClientId = attachedClientId;
+       _hostGateway = hostGateway;
 
   final CommonCodeSessionDriver _driver;
   final CommonCodeSessionObservation _observation;
   final HostGateway _hostGateway;
-  final String _attachedClientId;
   final StreamController<CommonCodeSessionFacadeState> _states =
       StreamController<CommonCodeSessionFacadeState>.broadcast(sync: true);
 
@@ -123,7 +130,8 @@ final class CommonCodeSessionFacade {
   StreamSubscription<Session>? _watchSubscription;
   Future<void> _watchRestartSequence = Future<void>.value();
   bool _isDisposed = false;
-  String? _currentSessionId;
+  CommonCodeSessionBinding _currentBinding =
+      const CommonCodeSessionBinding.empty();
   int _watchGeneration = 0;
 
   Stream<CommonCodeSessionFacadeState> get states => _states.stream;
@@ -141,14 +149,14 @@ final class CommonCodeSessionFacade {
   }
 
   Future<void> acknowledgeNotification({required String notificationId}) async {
-    final sessionId = await _ensureSessionId();
-    if (sessionId == null) {
+    final binding = await _ensureSessionBinding();
+    if (!binding.hasSession) {
       throw StateError('No session available.');
     }
 
     await Future.sync(
       () => _driver.acknowledgeNotification(
-        sessionId: sessionId,
+        sessionId: binding.sessionId!,
         notificationId: notificationId,
       ),
     );
@@ -158,15 +166,15 @@ final class CommonCodeSessionFacade {
     _emitState(_state.copyWithSubmitting(true));
 
     try {
-      final sessionId = await _ensureSessionId();
-      if (sessionId == null) {
+      final binding = await _ensureSessionBinding();
+      if (!binding.hasSession) {
         throw StateError('No session available.');
       }
 
       await Future.sync(
         () => _hostGateway.submitTurn(
-          sessionId: sessionId,
-          client: Client(id: _attachedClientId),
+          sessionId: binding.sessionId!,
+          client: Client(id: binding.attachedClientId!),
           submittedText: submittedText,
         ),
       );
@@ -197,17 +205,22 @@ final class CommonCodeSessionFacade {
   }
 
   Future<String?> _ensureSessionId() async {
-    if (_currentSessionId != null) {
-      return _currentSessionId;
+    final binding = await _ensureSessionBinding();
+    return binding.sessionId;
+  }
+
+  Future<CommonCodeSessionBinding> _ensureSessionBinding() async {
+    if (_currentBinding.hasSession) {
+      return _currentBinding;
     }
 
     final binding = await _driver.ensureSession();
     if (!binding.hasSession) {
-      return null;
+      return binding;
     }
 
-    _currentSessionId = binding.sessionId;
-    return _currentSessionId;
+    _currentBinding = binding;
+    return _currentBinding;
   }
 
   Future<void> _startSessionWatch() {
@@ -263,7 +276,7 @@ final class CommonCodeSessionFacade {
             CommonCodeSessionFacadeState.data(
               CommonCodeSessionSnapshot(
                 session: session,
-                attachedClientId: _attachedClientId,
+                attachedClientId: _currentBinding.attachedClientId!,
               ),
               isSubmitting: _state.isSubmitting,
             ),

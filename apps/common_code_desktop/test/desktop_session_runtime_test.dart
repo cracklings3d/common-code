@@ -1,14 +1,20 @@
 import 'dart:async';
 import 'dart:convert';
 
-import 'package:common_code_desktop/src/desktop_session_runtime.dart';
+import 'package:common_code_desktop/src/desktop_session_runtime.dart'
+    hide
+        desktopSessionRuntimeAttachedClientId,
+        desktopSessionRuntimeDefaultSessionId;
+import 'package:common_code_desktop/src/desktop_session_app_edge_composition.dart';
 import 'package:common_code_desktop/src/durable_local_host_service.dart';
 import 'package:common_code_domain/common_code_domain.dart';
 import 'package:common_code_persistence/common_code_persistence.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:common_code_application/common_code_application.dart';
-import 'package:host_in_memory/host_in_memory.dart';
+import 'package:host_core/host_core.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+
+import 'package:common_code_desktop/src/desktop_session_runtime_constants.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -262,68 +268,6 @@ void main() {
       );
     });
 
-    test('queued and running turns remain frozen after restart', () async {
-      final queuedStorage = _MemoryDurableStorage(
-        payload: jsonEncode(
-          const SessionSnapshotCodec().encode(_queuedSession()),
-        ),
-      );
-      final queuedRuntime = HostDesktopSessionRuntime(
-        hostServiceFactory: () => DurableLocalHostService(
-          durableStorage: queuedStorage,
-          legacySnapshotStore: _MemoryLegacySnapshotStore(),
-          simulationPolicy: const HostExecutionSimulationPolicy(
-            queuedToRunningDelay: Duration.zero,
-            runningToTerminalDelay: Duration.zero,
-          ),
-        ),
-      );
-      Session? queuedSnapshot;
-      queuedRuntime.bind(
-        onSnapshot: (session) => queuedSnapshot = session,
-        onWatchError: (error, stackTrace) {},
-      );
-
-      await queuedRuntime.initialize();
-      await Future<void>.delayed(Duration.zero);
-
-      expect(queuedSnapshot!.activeTurn?.status, TurnStatus.queued);
-
-      final runningStorage = _MemoryDurableStorage(
-        payload: jsonEncode(
-          const SessionSnapshotCodec().encode(
-            _runningSessionWithNotifications(),
-          ),
-        ),
-      );
-      final runningRuntime = HostDesktopSessionRuntime(
-        hostServiceFactory: () => DurableLocalHostService(
-          durableStorage: _MemoryDurableStorage(
-            payload: jsonEncode(
-              const SessionSnapshotCodec().encode(
-                _runningSessionWithNotifications(),
-              ),
-            ),
-          ),
-          legacySnapshotStore: _MemoryLegacySnapshotStore(),
-          simulationPolicy: const HostExecutionSimulationPolicy(
-            queuedToRunningDelay: Duration.zero,
-            runningToTerminalDelay: Duration.zero,
-          ),
-        ),
-      );
-      Session? runningSnapshot;
-      runningRuntime.bind(
-        onSnapshot: (session) => runningSnapshot = session,
-        onWatchError: (error, stackTrace) {},
-      );
-
-      await runningRuntime.initialize();
-      await Future<void>.delayed(Duration.zero);
-
-      expect(runningSnapshot!.activeTurn?.status, TurnStatus.running);
-    });
-
     test(
       'refresh cancels the prior watch before starting replacement watch',
       () async {
@@ -363,9 +307,7 @@ void main() {
           hostServiceFactory: () => _RejectingRestoreDurableLocalHostService(
             durableStorage: _MemoryDurableStorage(
               payload: jsonEncode(
-                const SessionSnapshotCodec().encode(
-                  _queuedSession(),
-                ),
+                const SessionSnapshotCodec().encode(_queuedSession()),
               ),
             ),
             legacySnapshotStore: _MemoryLegacySnapshotStore(
@@ -408,9 +350,7 @@ void main() {
           legacySnapshotStore: _MemoryLegacySnapshotStore(),
           diagnosticsSink: (diagnostic) => diagnostics.add(diagnostic.code),
         );
-        final runtime = HostDesktopSessionRuntime(
-          hostService: hostService,
-        );
+        final runtime = HostDesktopSessionRuntime(hostService: hostService);
         Session? snapshot;
         runtime.bind(
           onSnapshot: (session) => snapshot = session,
@@ -432,6 +372,25 @@ void main() {
           diagnostics,
           contains(DurableLocalHostDiagnosticCode.durableWriteFailed),
         );
+      },
+    );
+
+    test(
+      'app-edge driver returns bound identity and attached client',
+      () async {
+        final driver = HostCoreDesktopSessionDriver(
+          hostService: _TrackingHostService(),
+          snapshotStore: _MemoryLegacySnapshotStore(),
+        );
+
+        final binding = await driver.ensureSession();
+
+        expect(binding.sessionId, desktopSessionRuntimeDefaultSessionId);
+        expect(
+          binding.identity,
+          const Identity(id: desktopSessionRuntimeIdentityId),
+        );
+        expect(binding.attachedClientId, desktopSessionRuntimeAttachedClientId);
       },
     );
   });

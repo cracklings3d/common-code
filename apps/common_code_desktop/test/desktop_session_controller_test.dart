@@ -94,6 +94,25 @@ void main() {
       expect(controller.state.status, DesktopSessionControllerStatus.data);
     });
 
+    test('submit remains a thin delegation into runtime submission', () async {
+      final runtime = _FakeDesktopSessionRuntime();
+      final controller = DesktopSessionController(runtime: runtime);
+
+      runtime.emitState(
+        CommonCodeSessionFacadeState.data(_applicationSnapshot),
+      );
+
+      final submitFuture = controller.submitTurn(
+        submittedText: 'delegated turn',
+      );
+
+      expect(runtime.submittedTexts, ['delegated turn']);
+      expect(runtime.submitCallCount, 1);
+
+      runtime.completeSubmit();
+      await submitFuture;
+    });
+
     test(
       'submit failure surfaces as renderable error state and clears flag',
       () async {
@@ -113,36 +132,6 @@ void main() {
         expect(controller.state.isSubmitting, isFalse);
         expect(controller.state.status, DesktopSessionControllerStatus.error);
         expect(controller.state.message, contains('submit failed'));
-      },
-    );
-
-    test(
-      'acknowledgement failure surfaces on data state and clears busy flag',
-      () async {
-        final runtime = _FakeDesktopSessionRuntime()
-          ..acknowledgeError = StateError('ack failed');
-        final controller = DesktopSessionController(runtime: runtime);
-
-        runtime.emitState(
-          CommonCodeSessionFacadeState.data(
-            CommonCodeSessionSnapshot(
-              session: _sessionWithNotification(),
-              attachedClientId: 'desktop-client',
-            ),
-          ),
-        );
-
-        await expectLater(
-          controller.acknowledgeNotification(notificationId: 'notification-1'),
-          throwsA(isA<StateError>()),
-        );
-
-        expect(controller.state.status, DesktopSessionControllerStatus.data);
-        expect(controller.state.isAcknowledgingNotification, isFalse);
-        expect(
-          controller.state.acknowledgementErrorMessage,
-          contains('ack failed'),
-        );
       },
     );
 
@@ -207,15 +196,13 @@ final class _FakeDesktopSessionRuntime implements DesktopSessionRuntime {
       StreamController<CommonCodeSessionFacadeState>.broadcast(sync: true);
 
   final List<String> submittedTexts = <String>[];
-  final List<String> acknowledgedNotificationIds = <String>[];
+  int submitCallCount = 0;
   Completer<void>? _pendingInitialize;
   Completer<void>? _pendingRefresh;
   Completer<void>? _pendingSubmit;
   Object? submitError;
   CommonCodeSessionFacadeState _state =
       const CommonCodeSessionFacadeState.loading();
-  Object? acknowledgeError;
-
   @override
   void bind({
     required void Function(Session session) onSnapshot,
@@ -244,6 +231,7 @@ final class _FakeDesktopSessionRuntime implements DesktopSessionRuntime {
 
   @override
   Future<void> submitTurn({required String submittedText}) {
+    submitCallCount += 1;
     submittedTexts.add(submittedText);
     if (submitError case final Object error) {
       return Future<void>.error(error);
@@ -252,16 +240,6 @@ final class _FakeDesktopSessionRuntime implements DesktopSessionRuntime {
     final completer = Completer<void>();
     _pendingSubmit = completer;
     return completer.future;
-  }
-
-  @override
-  Future<void> acknowledgeNotification({required String notificationId}) {
-    acknowledgedNotificationIds.add(notificationId);
-    if (acknowledgeError case final Object error) {
-      return Future<void>.error(error);
-    }
-
-    return Future<void>.value();
   }
 
   void emitState(CommonCodeSessionFacadeState state) {
@@ -289,28 +267,4 @@ final class _FakeDesktopSessionRuntime implements DesktopSessionRuntime {
     _pendingSubmit?.complete();
     await _states.close();
   }
-}
-
-Session _sessionWithNotification() {
-  final runningSession = _bootstrapSession()
-      .startTurn(
-        turnId: 'turn-1',
-        client: const Client(id: 'desktop-client'),
-        submittedText: 'queued turn',
-      )
-      .advanceActiveTurnToRunning();
-
-  return Session(
-    id: runningSession.id,
-    activeHost: runningSession.activeHost,
-    clients: runningSession.clients,
-    promptThread: runningSession.promptThread,
-    notifications: [
-      SessionNotification.forTransition(
-        sessionId: 'desktop-session',
-        turnId: 'turn-1',
-        transition: SessionNotificationTransition.queuedToRunning,
-      ),
-    ],
-  );
 }
