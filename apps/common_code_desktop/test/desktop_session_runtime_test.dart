@@ -24,7 +24,7 @@ void main() {
       final diagnostics = <DurableLocalHostDiagnosticCode>[];
       final runtime = _createDurableRuntime(
         snapshotStore: _MemoryLegacySnapshotStore(),
-        diagnosticsSink: DurableLocalHostDiagnosticsEmitter(
+        diagnosticsPort: DurableLocalHostDiagnosticsEmitter(
           (diagnostic) => diagnostics.add(diagnostic.code),
         ),
       );
@@ -59,7 +59,7 @@ void main() {
         final runtime = _createDurableRuntime(
           durableStorage: durableStorage,
           snapshotStore: snapshotStore,
-          diagnosticsSink: DurableLocalHostDiagnosticsEmitter(
+          diagnosticsPort: DurableLocalHostDiagnosticsEmitter(
             (diagnostic) => diagnostics.add(diagnostic.code),
           ),
         );
@@ -102,7 +102,7 @@ void main() {
         final runtime = _createDurableRuntime(
           durableStorage: durableStorage,
           snapshotStore: snapshotStore,
-          diagnosticsSink: DurableLocalHostDiagnosticsEmitter(
+          diagnosticsPort: DurableLocalHostDiagnosticsEmitter(
             (diagnostic) => diagnostics.add(diagnostic.code),
           ),
         );
@@ -139,7 +139,7 @@ void main() {
         final runtime = _createDurableRuntime(
           durableStorage: durableStorage,
           snapshotStore: _MemoryLegacySnapshotStore(),
-          diagnosticsSink: DurableLocalHostDiagnosticsEmitter(
+          diagnosticsPort: DurableLocalHostDiagnosticsEmitter(
             (diagnostic) => diagnostics.add(diagnostic.code),
           ),
         );
@@ -177,7 +177,7 @@ void main() {
           snapshotStore: _MemoryLegacySnapshotStore(
             storedSession: _completedSession(),
           ),
-          diagnosticsSink: DurableLocalHostDiagnosticsEmitter(
+          diagnosticsPort: DurableLocalHostDiagnosticsEmitter(
             (diagnostic) => diagnostics.add(diagnostic.code),
           ),
         );
@@ -213,7 +213,7 @@ void main() {
           snapshotStore: _MemoryLegacySnapshotStore(
             storedSession: _completedSession(),
           ),
-          diagnosticsSink: DurableLocalHostDiagnosticsEmitter(
+          diagnosticsPort: DurableLocalHostDiagnosticsEmitter(
             (diagnostic) => diagnostics.add(diagnostic.code),
           ),
         );
@@ -421,7 +421,7 @@ void main() {
           snapshotStore: _MemoryLegacySnapshotStore(
             storedSession: _completedSession(),
           ),
-          diagnosticsSink: DurableLocalHostDiagnosticsEmitter(
+          diagnosticsPort: DurableLocalHostDiagnosticsEmitter(
             (diagnostic) => diagnostics.add(diagnostic.code),
           ),
         );
@@ -462,7 +462,7 @@ void main() {
             legacySnapshotStore: _MemoryLegacySnapshotStore(),
             durableStorage: storage,
           ),
-          diagnosticsSink: DurableLocalHostDiagnosticsEmitter(
+          diagnosticsPort: DurableLocalHostDiagnosticsEmitter(
             (diagnostic) => diagnostics.add(diagnostic.code),
           ),
         );

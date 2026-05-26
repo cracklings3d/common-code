@@ -112,7 +112,7 @@ void main() {
         snapshotStore: _MemoryLegacySnapshotStore(
           storedSession: _completedSessionWithNotifications(),
         ),
-        diagnosticsSink: DurableLocalHostDiagnosticsEmitter(
+        diagnosticsPort: DurableLocalHostDiagnosticsEmitter(
           (diagnostic) => diagnostics.add(diagnostic.code),
         ),
       );
@@ -146,7 +146,7 @@ void main() {
         snapshotStore: _MemoryLegacySnapshotStore(
           storedSession: _completedSessionWithNotifications(),
         ),
-        diagnosticsSink: DurableLocalHostDiagnosticsEmitter(
+        diagnosticsPort: DurableLocalHostDiagnosticsEmitter(
           (diagnostic) => diagnostics.add(diagnostic.code),
         ),
       );
@@ -293,7 +293,6 @@ void main() {
   });
 }
 
-SessionSnapshotStore? _lastCreatedSnapshotStore;
 DurableLocalHostService? _lastCreatedDurableService;
 HostService? _lastCreatedHostService;
 
@@ -312,7 +311,6 @@ HostService _createDurableHostAdapter({
     ),
     diagnosticsPort: diagnosticsPort,
   );
-  _lastCreatedSnapshotStore = snapshotStore;
   _lastCreatedDurableService = durableService;
   _lastCreatedHostService = hostService;
   return hostService;
@@ -326,7 +324,7 @@ HostDesktopSessionRuntime _createDurableRuntime({
   final hostService = _createDurableHostAdapter(
     durableStorage: durableStorage,
     snapshotStore: snapshotStore,
-    diagnosticsSink: diagnosticsPort,
+    diagnosticsPort: diagnosticsPort,
   );
   return HostDesktopSessionRuntime(
     hostService: hostService,
