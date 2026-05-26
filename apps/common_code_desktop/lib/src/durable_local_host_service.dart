@@ -3,7 +3,6 @@
 import 'dart:async';
 import 'dart:convert';
 
-import 'package:common_code_application/src/common_code_session_bootstrap.dart';
 import 'package:common_code_domain/common_code_domain.dart';
 import 'package:common_code_observability/common_code_observability.dart';
 import 'package:common_code_persistence/common_code_persistence.dart';
@@ -15,7 +14,8 @@ import 'package:host_in_memory/host_in_memory.dart';
 // that import from DurableLocalHostService.
 export 'package:common_code_observability/common_code_observability.dart';
 
-class DurableLocalHostService implements HostService {
+class DurableLocalHostService
+    implements HostService, CommonCodeSessionBootstrapPort {
   /// Creates a [DurableLocalHostService] with an injected [hostAdapter].
   ///
   /// Use this factory for new composition code.
@@ -30,8 +30,7 @@ class DurableLocalHostService implements HostService {
       hostAdapter: hostAdapter,
       legacySnapshotStore:
           legacySnapshotStore ?? SharedPreferencesSessionSnapshotStore(),
-      durableStorage:
-          durableStorage ?? SharedPreferencesDurableSessionStore(),
+      durableStorage: durableStorage ?? SharedPreferencesDurableSessionStore(),
       codec: codec,
       diagnosticsSink: diagnosticsSink,
     );
@@ -74,35 +73,11 @@ class DurableLocalHostService implements HostService {
   final DurableLocalHostDiagnosticsSink? _diagnosticsSink;
 
   Future<void> _writeSequence = Future<void>.value();
-  String? _bootstrappedSessionId;
   String? _desktopClientIdForDurableWrites;
-  bool _isBootstrapped = false;
-
-  Future<Session> bootstrap({
-    required String defaultSessionId,
-    required String hostId,
-    required String desktopClientId,
-  }) async {
-    return const CommonCodeSessionBootstrapOrchestrator().bootstrap(
-      request: CommonCodeSessionBootstrapRequest(
-        defaultSessionId: defaultSessionId,
-        hostId: hostId,
-        attachedClientId: desktopClientId,
-      ),
-      isBootstrapped: isBootstrapped,
-      readBootstrappedSession: readBootstrappedSession,
-      loadDurableSessionCandidate: loadDurableSessionCandidate,
-      restoreDurableSession: restoreDurableSession,
-      loadLegacySeedSession: loadLegacySeedSession,
-      restoreLegacySeededSession: restoreLegacySeededSession,
-      createFreshSession: createFreshSession,
-    );
-  }
 
   Future<void> flushPendingWrites() => _writeSequence;
 
-  bool get isBootstrapped => _isBootstrapped;
-
+  @override
   Future<Session> createFreshSession(
     CommonCodeSessionBootstrapRequest request,
   ) {
@@ -113,6 +88,7 @@ class DurableLocalHostService implements HostService {
     );
   }
 
+  @override
   Future<CommonCodeLegacySeedLoadResult> loadLegacySeedSession({
     required String attachedClientId,
   }) async {
@@ -162,6 +138,7 @@ class DurableLocalHostService implements HostService {
     }
   }
 
+  @override
   Future<CommonCodeDurableBootstrapLoadResult> loadDurableSessionCandidate({
     required String attachedClientId,
   }) async {
@@ -211,10 +188,7 @@ class DurableLocalHostService implements HostService {
     }
   }
 
-  Session readBootstrappedSession() {
-    return _hostAdapter.readSession(_bootstrappedSessionId!);
-  }
-
+  @override
   Future<Session> restoreLegacySeededSession({
     required Session session,
     required String attachedClientId,
@@ -238,8 +212,6 @@ class DurableLocalHostService implements HostService {
         rethrow;
       }
 
-      _bootstrappedSessionId = restoredSession.id;
-      _isBootstrapped = true;
       _emit(
         const DurableLocalHostDiagnostic(
           DurableLocalHostDiagnosticCode.legacySeedSucceeded,
@@ -260,11 +232,10 @@ class DurableLocalHostService implements HostService {
     }
   }
 
+  @override
   Session restoreDurableSession(Session session) {
     try {
       final restoredSession = _hostAdapter.restoreSession(session);
-      _bootstrappedSessionId = restoredSession.id;
-      _isBootstrapped = true;
       _emit(
         const DurableLocalHostDiagnostic(
           DurableLocalHostDiagnosticCode.durableReadRestored,
@@ -365,8 +336,6 @@ class DurableLocalHostService implements HostService {
       sessionId: createdSession.id,
       client: Client(id: desktopClientId),
     );
-    _bootstrappedSessionId = attachedSession.id;
-    _isBootstrapped = true;
 
     try {
       await _persistBootstrapSession(attachedSession);

@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:common_code_application/common_code_application.dart';
 import 'package:common_code_domain/common_code_domain.dart';
 import 'package:flutter/foundation.dart';
 import 'package:host_core/host_core.dart';
@@ -83,6 +84,8 @@ final class HostDesktopSessionRuntime implements DesktopSessionRuntime {
   String? _currentSessionId;
   _RuntimeSessionContext? _currentSessionContext;
   int _watchGeneration = 0;
+  final CommonCodeSessionBootstrapLifecycle _bootstrapLifecycle =
+      CommonCodeSessionBootstrapLifecycle();
 
   @visibleForTesting
   ({String sessionId, Identity identity, String attachedClientId})?
@@ -219,11 +222,14 @@ final class HostDesktopSessionRuntime implements DesktopSessionRuntime {
       return;
     }
 
-    if (service case final DurableLocalHostService durableService) {
-      final bootstrappedSession = await durableService.bootstrap(
-        defaultSessionId: _defaultSessionId,
-        hostId: _hostId,
-        desktopClientId: _attachedClientId,
+    if (service case final CommonCodeSessionBootstrapPort bootstrapPort) {
+      final bootstrappedSession = await _bootstrapLifecycle.bootstrap(
+        request: CommonCodeSessionBootstrapRequest(
+          defaultSessionId: _defaultSessionId,
+          hostId: _hostId,
+          attachedClientId: _attachedClientId,
+        ),
+        port: bootstrapPort,
       );
       _currentSessionId = bootstrappedSession.id;
       _isBootstrapped = true;

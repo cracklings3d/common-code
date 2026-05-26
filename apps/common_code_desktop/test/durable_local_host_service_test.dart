@@ -1,5 +1,6 @@
 import 'dart:convert';
 
+import 'package:common_code_application/common_code_application.dart';
 import 'package:common_code_desktop/src/durable_local_host_service.dart';
 import 'package:common_code_desktop/src/desktop_session_runtime.dart';
 import 'package:common_code_domain/common_code_domain.dart';
@@ -20,11 +21,7 @@ void main() {
         diagnosticsSink: (diagnostic) => diagnostics.add(diagnostic.code),
       );
 
-      final session = await service.bootstrap(
-        defaultSessionId: desktopSessionRuntimeDefaultSessionId,
-        hostId: desktopSessionRuntimeHostId,
-        desktopClientId: desktopSessionRuntimeAttachedClientId,
-      );
+      final session = await _bootstrapService(service);
 
       expectSessionLike(session, _completedSession());
       expect(
@@ -49,17 +46,17 @@ void main() {
         ),
       );
 
-      final seededSession = await service.bootstrap(
-        defaultSessionId: desktopSessionRuntimeDefaultSessionId,
-        hostId: desktopSessionRuntimeHostId,
-        desktopClientId: desktopSessionRuntimeAttachedClientId,
-      );
+      final seededSession = await _bootstrapService(service);
 
-      final nextSession = await service.bootstrap(
-        defaultSessionId: 'other-session',
-        hostId: 'other-host',
-        desktopClientId: 'other-client',
-      );
+      final nextSession = await CommonCodeSessionBootstrapLifecycle.of(service)
+          .bootstrap(
+            request: const CommonCodeSessionBootstrapRequest(
+              defaultSessionId: 'other-session',
+              hostId: 'other-host',
+              attachedClientId: 'other-client',
+            ),
+            port: service,
+          );
 
       expect(nextSession.id, seededSession.id);
       expectSessionLike(nextSession, seededSession);
@@ -77,11 +74,7 @@ void main() {
           diagnosticsSink: (diagnostic) => diagnostics.add(diagnostic.code),
         );
 
-        final session = await service.bootstrap(
-          defaultSessionId: desktopSessionRuntimeDefaultSessionId,
-          hostId: desktopSessionRuntimeHostId,
-          desktopClientId: desktopSessionRuntimeAttachedClientId,
-        );
+        final session = await _bootstrapService(service);
 
         expect(session.id, desktopSessionRuntimeDefaultSessionId);
         expect(
@@ -113,11 +106,7 @@ void main() {
           diagnosticsSink: (diagnostic) => diagnostics.add(diagnostic.code),
         );
 
-        final session = await service.bootstrap(
-          defaultSessionId: desktopSessionRuntimeDefaultSessionId,
-          hostId: desktopSessionRuntimeHostId,
-          desktopClientId: desktopSessionRuntimeAttachedClientId,
-        );
+        final session = await _bootstrapService(service);
 
         expect(session.id, desktopSessionRuntimeDefaultSessionId);
         expect(
@@ -148,11 +137,7 @@ void main() {
           legacySnapshotStore: _MemoryLegacySnapshotStore(),
         );
 
-        final session = await service.bootstrap(
-          defaultSessionId: desktopSessionRuntimeDefaultSessionId,
-          hostId: desktopSessionRuntimeHostId,
-          desktopClientId: desktopSessionRuntimeAttachedClientId,
-        );
+        final session = await _bootstrapService(service);
 
         expectSessionLike(session, _runningSessionWithNotifications());
         expectSessionLike(
@@ -172,11 +157,7 @@ void main() {
         diagnosticsSink: (diagnostic) => diagnostics.add(diagnostic.code),
       );
 
-      final session = await service.bootstrap(
-        defaultSessionId: desktopSessionRuntimeDefaultSessionId,
-        hostId: desktopSessionRuntimeHostId,
-        desktopClientId: desktopSessionRuntimeAttachedClientId,
-      );
+      final session = await _bootstrapService(service);
 
       expectSessionLike(session, _completedSession());
       expect(
@@ -199,11 +180,7 @@ void main() {
           diagnosticsSink: (diagnostic) => diagnostics.add(diagnostic.code),
         );
 
-        final session = await service.bootstrap(
-          defaultSessionId: desktopSessionRuntimeDefaultSessionId,
-          hostId: desktopSessionRuntimeHostId,
-          desktopClientId: desktopSessionRuntimeAttachedClientId,
-        );
+        final session = await _bootstrapService(service);
 
         expect(session.id, desktopSessionRuntimeDefaultSessionId);
         expect(
@@ -233,11 +210,7 @@ void main() {
           diagnosticsSink: (diagnostic) => diagnostics.add(diagnostic.code),
         );
 
-        final session = await service.bootstrap(
-          defaultSessionId: desktopSessionRuntimeDefaultSessionId,
-          hostId: desktopSessionRuntimeHostId,
-          desktopClientId: desktopSessionRuntimeAttachedClientId,
-        );
+        final session = await _bootstrapService(service);
 
         expect(session.id, desktopSessionRuntimeDefaultSessionId);
         expect(
@@ -269,11 +242,7 @@ void main() {
           diagnosticsSink: (diagnostic) => diagnostics.add(diagnostic.code),
         );
 
-        final session = await service.bootstrap(
-          defaultSessionId: desktopSessionRuntimeDefaultSessionId,
-          hostId: desktopSessionRuntimeHostId,
-          desktopClientId: desktopSessionRuntimeAttachedClientId,
-        );
+        final session = await _bootstrapService(service);
 
         expect(session.id, desktopSessionRuntimeDefaultSessionId);
         expect(
@@ -307,11 +276,7 @@ void main() {
         diagnosticsSink: (diagnostic) => diagnostics.add(diagnostic.code),
       );
 
-      final session = await service.bootstrap(
-        defaultSessionId: desktopSessionRuntimeDefaultSessionId,
-        hostId: desktopSessionRuntimeHostId,
-        desktopClientId: desktopSessionRuntimeAttachedClientId,
-      );
+      final session = await _bootstrapService(service);
 
       expectSessionLike(session, _completedSession());
       expect(
@@ -339,11 +304,7 @@ void main() {
           diagnosticsSink: (diagnostic) => diagnostics.add(diagnostic.code),
         );
 
-        final session = await service.bootstrap(
-          defaultSessionId: desktopSessionRuntimeDefaultSessionId,
-          hostId: desktopSessionRuntimeHostId,
-          desktopClientId: desktopSessionRuntimeAttachedClientId,
-        );
+        final session = await _bootstrapService(service);
 
         expect(session.id, desktopSessionRuntimeDefaultSessionId);
         expect(
@@ -380,11 +341,7 @@ void main() {
         diagnosticsSink: (diagnostic) => diagnostics.add(diagnostic.code),
       );
 
-      final session = await service.bootstrap(
-        defaultSessionId: desktopSessionRuntimeDefaultSessionId,
-        hostId: desktopSessionRuntimeHostId,
-        desktopClientId: desktopSessionRuntimeAttachedClientId,
-      );
+      final session = await _bootstrapService(service);
 
       expect(session.id, desktopSessionRuntimeDefaultSessionId);
       expect(
@@ -410,11 +367,7 @@ void main() {
         diagnosticsSink: (diagnostic) => diagnostics.add(diagnostic.code),
       );
 
-      final session = await service.bootstrap(
-        defaultSessionId: desktopSessionRuntimeDefaultSessionId,
-        hostId: desktopSessionRuntimeHostId,
-        desktopClientId: desktopSessionRuntimeAttachedClientId,
-      );
+      final session = await _bootstrapService(service);
       storage.writeError = StateError('write boom');
 
       final updated = service.submitTurn(
@@ -446,11 +399,7 @@ void main() {
           ),
           legacySnapshotStore: _MemoryLegacySnapshotStore(),
         );
-        final queuedSession = await queuedService.bootstrap(
-          defaultSessionId: desktopSessionRuntimeDefaultSessionId,
-          hostId: desktopSessionRuntimeHostId,
-          desktopClientId: desktopSessionRuntimeAttachedClientId,
-        );
+        final queuedSession = await _bootstrapService(queuedService);
         await Future<void>.delayed(Duration.zero);
         expect(queuedSession.activeTurn?.status, TurnStatus.queued);
         expect(
@@ -468,11 +417,7 @@ void main() {
           ),
           legacySnapshotStore: _MemoryLegacySnapshotStore(),
         );
-        final runningSession = await runningService.bootstrap(
-          defaultSessionId: desktopSessionRuntimeDefaultSessionId,
-          hostId: desktopSessionRuntimeHostId,
-          desktopClientId: desktopSessionRuntimeAttachedClientId,
-        );
+        final runningSession = await _bootstrapService(runningService);
         await Future<void>.delayed(Duration.zero);
         expect(runningSession.activeTurn?.status, TurnStatus.running);
         expect(
@@ -494,11 +439,7 @@ void main() {
         legacySnapshotStore: _MemoryLegacySnapshotStore(),
       );
 
-      final notifiedSession = await notifiedService.bootstrap(
-        defaultSessionId: desktopSessionRuntimeDefaultSessionId,
-        hostId: desktopSessionRuntimeHostId,
-        desktopClientId: desktopSessionRuntimeAttachedClientId,
-      );
+      final notifiedSession = await _bootstrapService(notifiedService);
 
       expect(
         notifiedSession.notifications,
@@ -528,11 +469,7 @@ void main() {
         legacySnapshotStore: _MemoryLegacySnapshotStore(),
       );
 
-      final turnOnlySession = await turnOnlyService.bootstrap(
-        defaultSessionId: desktopSessionRuntimeDefaultSessionId,
-        hostId: desktopSessionRuntimeHostId,
-        desktopClientId: desktopSessionRuntimeAttachedClientId,
-      );
+      final turnOnlySession = await _bootstrapService(turnOnlyService);
 
       expect(turnOnlySession.notifications, isEmpty);
     });
@@ -543,7 +480,7 @@ void main() {
         final service = DurableLocalHostService(
           durableStorage: _MemoryDurableStorage(
             payload: jsonEncode(
-              const DesktopSessionSnapshotJsonCodec().encode(
+              const SessionSnapshotCodec().encode(
                 _runningSessionWithNotifications(),
               ),
             ),
@@ -551,11 +488,7 @@ void main() {
           legacySnapshotStore: _MemoryLegacySnapshotStore(),
         );
 
-        final session = await service.bootstrap(
-          defaultSessionId: desktopSessionRuntimeDefaultSessionId,
-          hostId: desktopSessionRuntimeHostId,
-          desktopClientId: desktopSessionRuntimeAttachedClientId,
-        );
+        final session = await _bootstrapService(service);
         final notificationId = session.notifications
             .firstWhere((notification) => !notification.isAcknowledged)
             .id;
@@ -595,11 +528,7 @@ void main() {
           legacySnapshotStore: legacyStore,
         );
 
-        final seededSession = await service.bootstrap(
-          defaultSessionId: desktopSessionRuntimeDefaultSessionId,
-          hostId: desktopSessionRuntimeHostId,
-          desktopClientId: desktopSessionRuntimeAttachedClientId,
-        );
+        final seededSession = await _bootstrapService(service);
 
         expectSessionLike(seededSession, _completedSession());
         expect(storage.legacySeedEnabled, isFalse);
@@ -614,11 +543,7 @@ void main() {
           diagnosticsSink: (diagnostic) => nextDiagnostics.add(diagnostic.code),
         );
 
-        final freshSession = await nextService.bootstrap(
-          defaultSessionId: desktopSessionRuntimeDefaultSessionId,
-          hostId: desktopSessionRuntimeHostId,
-          desktopClientId: desktopSessionRuntimeAttachedClientId,
-        );
+        final freshSession = await _bootstrapService(nextService);
 
         expect(freshSession.id, desktopSessionRuntimeDefaultSessionId);
         expect(
@@ -632,6 +557,17 @@ void main() {
       },
     );
   });
+}
+
+Future<Session> _bootstrapService(DurableLocalHostService service) {
+  return CommonCodeSessionBootstrapLifecycle.of(service).bootstrap(
+    request: const CommonCodeSessionBootstrapRequest(
+      defaultSessionId: desktopSessionRuntimeDefaultSessionId,
+      hostId: desktopSessionRuntimeHostId,
+      attachedClientId: desktopSessionRuntimeAttachedClientId,
+    ),
+    port: service,
+  );
 }
 
 void expectSessionLike(Session actual, Session expected) {
@@ -816,7 +752,7 @@ final class _RejectingRestoreDurableLocalHostService
   });
 
   @override
-  Session restoreBootstrappedSession(Session session) {
+  Session restoreDurableSession(Session session) {
     throw StateError('restore rejected');
   }
 }

@@ -1,5 +1,24 @@
 import 'package:common_code_domain/common_code_domain.dart';
 
+abstract interface class CommonCodeSessionBootstrapPort {
+  Future<CommonCodeDurableBootstrapLoadResult> loadDurableSessionCandidate({
+    required String attachedClientId,
+  });
+
+  Session restoreDurableSession(Session session);
+
+  Future<CommonCodeLegacySeedLoadResult> loadLegacySeedSession({
+    required String attachedClientId,
+  });
+
+  Future<Session> restoreLegacySeededSession({
+    required Session session,
+    required String attachedClientId,
+  });
+
+  Future<Session> createFreshSession(CommonCodeSessionBootstrapRequest request);
+}
+
 final class CommonCodeSessionBootstrapRequest {
   const CommonCodeSessionBootstrapRequest({
     required this.defaultSessionId,
@@ -152,5 +171,58 @@ final class CommonCodeSessionBootstrapOrchestrator {
       case CommonCodeLegacySeedLoadStatus.failed:
         return createFreshSession(request);
     }
+  }
+}
+
+final class CommonCodeSessionBootstrapLifecycle {
+  CommonCodeSessionBootstrapLifecycle({
+    CommonCodeSessionBootstrapOrchestrator orchestrator =
+        const CommonCodeSessionBootstrapOrchestrator(),
+  }) : _orchestrator = orchestrator;
+
+  static final Expando<CommonCodeSessionBootstrapLifecycle> _lifecycles =
+      Expando<CommonCodeSessionBootstrapLifecycle>(
+        'commonCodeSessionBootstrapLifecycle',
+      );
+
+  static CommonCodeSessionBootstrapLifecycle of(Object owner) {
+    return _lifecycles[owner] ??= CommonCodeSessionBootstrapLifecycle();
+  }
+
+  final CommonCodeSessionBootstrapOrchestrator _orchestrator;
+
+  Session? _bootstrappedSession;
+
+  bool get isBootstrapped => _bootstrappedSession != null;
+
+  Session readBootstrappedSession() {
+    final session = _bootstrappedSession;
+    if (session == null) {
+      throw StateError('Session has not been bootstrapped.');
+    }
+
+    return session;
+  }
+
+  void rememberBootstrappedSession(Session session) {
+    _bootstrappedSession = session;
+  }
+
+  Future<Session> bootstrap({
+    required CommonCodeSessionBootstrapRequest request,
+    required CommonCodeSessionBootstrapPort port,
+  }) async {
+    final session = await _orchestrator.bootstrap(
+      request: request,
+      isBootstrapped: isBootstrapped,
+      readBootstrappedSession: readBootstrappedSession,
+      loadDurableSessionCandidate: port.loadDurableSessionCandidate,
+      restoreDurableSession: port.restoreDurableSession,
+      loadLegacySeedSession: port.loadLegacySeedSession,
+      restoreLegacySeededSession: port.restoreLegacySeededSession,
+      createFreshSession: port.createFreshSession,
+    );
+    rememberBootstrappedSession(session);
+    return session;
   }
 }
