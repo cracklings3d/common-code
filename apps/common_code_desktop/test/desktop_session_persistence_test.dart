@@ -5,6 +5,8 @@ import 'package:common_code_desktop/src/durable_local_host_service.dart';
 import 'package:common_code_domain/common_code_domain.dart';
 import 'package:common_code_persistence/common_code_persistence.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:host_core/host_core.dart';
+import 'package:host_in_memory/host_in_memory.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 void main() {
@@ -83,11 +85,10 @@ void main() {
       final legacyStore = _MemoryLegacySnapshotStore(
         storedSession: _completedSessionWithNotifications(),
       );
-      final hostService = DurableLocalHostService(
+      final runtime = _createDurableRuntime(
         durableStorage: storage,
-        legacySnapshotStore: legacyStore,
+        snapshotStore: legacyStore,
       );
-      final runtime = HostDesktopSessionRuntime(hostService: hostService);
       Session? snapshot;
       runtime.bind(
         onSnapshot: (session) => snapshot = session,
@@ -95,7 +96,7 @@ void main() {
       );
 
       await runtime.initialize();
-      await hostService.sessionStore.waitForPendingPersistence();
+      await _lastCreatedDurableService!.flushPendingWrites();
 
       expectSessionLike(snapshot!, _completedSessionWithNotifications());
       expect(storage.payload, isNotNull);
@@ -105,14 +106,13 @@ void main() {
     test('missing ineligible branch boots fresh instead of seeding', () async {
       final diagnostics = <DurableLocalHostDiagnosticCode>[];
       final storage = _MemoryDurableStorage(legacySeedEnabled: false);
-      final hostService = DurableLocalHostService(
+      final runtime = _createDurableRuntime(
         durableStorage: storage,
-        legacySnapshotStore: _MemoryLegacySnapshotStore(
+        snapshotStore: _MemoryLegacySnapshotStore(
           storedSession: _completedSessionWithNotifications(),
         ),
         diagnosticsSink: (diagnostic) => diagnostics.add(diagnostic.code),
       );
-      final runtime = HostDesktopSessionRuntime(hostService: hostService);
       Session? snapshot;
       runtime.bind(
         onSnapshot: (session) => snapshot = session,
@@ -135,17 +135,16 @@ void main() {
 
     test('corrupt ineligible branch boots fresh instead of seeding', () async {
       final diagnostics = <DurableLocalHostDiagnosticCode>[];
-      final hostService = DurableLocalHostService(
+      final runtime = _createDurableRuntime(
         durableStorage: _MemoryDurableStorage(
           payload: '{bad-json',
           legacySeedEnabled: false,
         ),
-        legacySnapshotStore: _MemoryLegacySnapshotStore(
+        snapshotStore: _MemoryLegacySnapshotStore(
           storedSession: _completedSessionWithNotifications(),
         ),
         diagnosticsSink: (diagnostic) => diagnostics.add(diagnostic.code),
       );
-      final runtime = HostDesktopSessionRuntime(hostService: hostService);
       Session? snapshot;
       runtime.bind(
         onSnapshot: (session) => snapshot = session,
@@ -177,12 +176,10 @@ void main() {
           ),
           legacySeedEnabled: false,
         );
-        final runtime = HostDesktopSessionRuntime(
-          hostServiceFactory: () => DurableLocalHostService(
-            durableStorage: storage,
-            legacySnapshotStore: _MemoryLegacySnapshotStore(
-              storedSession: _completedSessionWithNotifications(),
-            ),
+        final runtime = _createDurableRuntime(
+          durableStorage: storage,
+          snapshotStore: _MemoryLegacySnapshotStore(
+            storedSession: _completedSessionWithNotifications(),
           ),
         );
         Session? snapshot;
@@ -200,17 +197,15 @@ void main() {
     test(
       'acknowledged notifications stay non-replayable after restart while unacknowledged remain replayable',
       () async {
-        final runtime = HostDesktopSessionRuntime(
-          hostServiceFactory: () => DurableLocalHostService(
-            durableStorage: _MemoryDurableStorage(
-              payload: jsonEncode(
-                const SessionSnapshotCodec().encode(
-                  _runningSessionWithNotifications(),
-                ),
+        final runtime = _createDurableRuntime(
+          durableStorage: _MemoryDurableStorage(
+            payload: jsonEncode(
+              const SessionSnapshotCodec().encode(
+                _runningSessionWithNotifications(),
               ),
             ),
-            legacySnapshotStore: _MemoryLegacySnapshotStore(),
           ),
+          snapshotStore: _MemoryLegacySnapshotStore(),
         );
         Session? snapshot;
         runtime.bind(
@@ -240,11 +235,11 @@ void main() {
           ),
         ),
       );
-      final firstHostService = DurableLocalHostService(
+      final firstRuntime = _createDurableRuntime(
         durableStorage: storage,
-        legacySnapshotStore: _MemoryLegacySnapshotStore(),
+        snapshotStore: _MemoryLegacySnapshotStore(),
       );
-      final firstRuntime = HostDesktopSessionRuntime(hostService: firstHostService);
+      final firstHostService = _lastCreatedHostService!;
       Session? firstSnapshot;
       firstRuntime.bind(
         onSnapshot: (session) => firstSnapshot = session,
@@ -256,17 +251,16 @@ void main() {
         (notification) => !notification.isAcknowledged,
       ).id;
 
-      firstHostService.acknowledgeNotification(
+      final acknowledgedSession = firstHostService.acknowledgeNotification(
         sessionId: firstSnapshot!.id,
         notificationId: acknowledgedNotificationId,
       );
-      await firstHostService.sessionStore.waitForPendingPersistence();
+      _lastCreatedDurableService!.queueSessionPersistence(acknowledgedSession);
+      await _lastCreatedDurableService!.flushPendingWrites();
 
-      final restartedRuntime = HostDesktopSessionRuntime(
-        hostService: DurableLocalHostService(
-          durableStorage: storage,
-          legacySnapshotStore: _MemoryLegacySnapshotStore(),
-        ),
+      final restartedRuntime = _createDurableRuntime(
+        durableStorage: storage,
+        snapshotStore: _MemoryLegacySnapshotStore(),
       );
       Session? restartedSnapshot;
       restartedRuntime.bind(
@@ -290,6 +284,49 @@ void main() {
       );
     });
   });
+}
+
+SessionSnapshotStore? _lastCreatedSnapshotStore;
+DurableLocalHostService? _lastCreatedDurableService;
+HostService? _lastCreatedHostService;
+
+HostService _createDurableHostAdapter({
+  required Object? durableStorage,
+  required SessionSnapshotStore snapshotStore,
+  DurableLocalHostDiagnosticsSink? diagnosticsSink,
+}) {
+  final hostAdapter = InMemoryHostAdapter();
+  final hostService = hostAdapter as HostService;
+  final durableService = DurableLocalHostService.withAdapter(
+    hostAdapter: hostAdapter,
+    sessionStore: DurableLocalSessionStore.fromPersistenceComponents(
+      legacySnapshotStore: snapshotStore,
+      durableStorage: durableStorage,
+    ),
+    diagnosticsSink: diagnosticsSink,
+  );
+  _lastCreatedSnapshotStore = snapshotStore;
+  _lastCreatedDurableService = durableService;
+  _lastCreatedHostService = hostService;
+  return hostService;
+}
+
+HostDesktopSessionRuntime _createDurableRuntime({
+  required Object? durableStorage,
+  required SessionSnapshotStore snapshotStore,
+  DurableLocalHostDiagnosticsSink? diagnosticsSink,
+}) {
+  final hostService = _createDurableHostAdapter(
+    durableStorage: durableStorage,
+    snapshotStore: snapshotStore,
+    diagnosticsSink: diagnosticsSink,
+  );
+  return HostDesktopSessionRuntime(
+    hostService: hostService,
+    bootstrapPort: _lastCreatedDurableService,
+    snapshotStore: snapshotStore,
+    persistSessionMutation: _lastCreatedDurableService!.queueSessionPersistence,
+  );
 }
 
 void expectSessionLike(Session actual, Session expected) {

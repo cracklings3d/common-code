@@ -47,29 +47,26 @@ abstract interface class DesktopSessionRuntime {
 final class HostDesktopSessionRuntime implements DesktopSessionRuntime {
   HostDesktopSessionRuntime({
     HostService? hostService,
+    CommonCodeSessionBootstrapPort? bootstrapPort,
     SessionSnapshotStore? snapshotStore,
-    HostService Function()? hostServiceFactory,
+    void Function(Session session)? persistSessionMutation,
     DurableLocalHostDiagnosticsSink? diagnosticsSink,
     String defaultSessionId = desktopSessionRuntimeDefaultSessionId,
     String hostId = desktopSessionRuntimeHostId,
     String attachedClientId = desktopSessionRuntimeAttachedClientId,
   }) : _hostService = hostService,
-       _legacySnapshotStore =
-           snapshotStore ?? SharedPreferencesSessionSnapshotStore(),
-       _hostServiceFactory =
-           hostServiceFactory ??
-           (() => DurableLocalHostService(
-             legacySnapshotStore:
-                 snapshotStore ?? SharedPreferencesSessionSnapshotStore(),
-             diagnosticsSink: diagnosticsSink,
-           )),
-       _defaultSessionId = defaultSessionId,
-       _hostId = hostId,
-       _attachedClientId = attachedClientId;
+       _bootstrapPort = bootstrapPort,
+        _legacySnapshotStore =
+            snapshotStore ?? SharedPreferencesSessionSnapshotStore(),
+        _persistSessionMutation = persistSessionMutation,
+        _defaultSessionId = defaultSessionId,
+        _hostId = hostId,
+        _attachedClientId = attachedClientId;
 
   final HostService? _hostService;
+  final CommonCodeSessionBootstrapPort? _bootstrapPort;
   final SessionSnapshotStore _legacySnapshotStore;
-  final HostService Function() _hostServiceFactory;
+  final void Function(Session session)? _persistSessionMutation;
   final String _defaultSessionId;
   final String _hostId;
   final String _attachedClientId;
@@ -77,6 +74,8 @@ final class HostDesktopSessionRuntime implements DesktopSessionRuntime {
   void Function(Session session)? _onSnapshot;
   void Function(Object error, StackTrace stackTrace)? _onWatchError;
   HostService? _service;
+  CommonCodeSessionBootstrapPort? _resolvedBootstrapPort;
+  void Function(Session session)? _resolvedPersistSessionMutation;
   StreamSubscription<Session>? _watchSubscription;
   Future<void> _watchRestartSequence = Future<void>.value();
   bool _isBootstrapped = false;
@@ -119,14 +118,15 @@ final class HostDesktopSessionRuntime implements DesktopSessionRuntime {
 
   @override
   Future<void> submitTurn({required String submittedText}) async {
-    final service = _service ??= _hostService ?? _hostServiceFactory();
+    final service = _resolveService();
     final context = await _ensureSessionContext();
 
-    service.submitTurn(
+    final session = service.submitTurn(
       sessionId: context.sessionId,
       client: Client(id: context.attachedClientId),
       submittedText: submittedText,
     );
+    _persistSessionMutationForResolvedService()?.call(session);
   }
 
   Future<void> _startSessionWatch() {
@@ -157,7 +157,7 @@ final class HostDesktopSessionRuntime implements DesktopSessionRuntime {
     final firstOutcomeSettled = Completer<void>();
 
     try {
-      final service = _service ??= _hostService ?? _hostServiceFactory();
+      final service = _resolveService();
       final context = await _ensureSessionContext();
 
       if (_isStaleGeneration(generation)) {
@@ -217,12 +217,17 @@ final class HostDesktopSessionRuntime implements DesktopSessionRuntime {
   }
 
   Future<void> _bootstrapIfNeeded() async {
-    final service = _service ??= _hostService ?? _hostServiceFactory();
+    final service = _resolveService();
     if (_isBootstrapped) {
       return;
     }
 
-    if (service case final CommonCodeSessionBootstrapPort bootstrapPort) {
+    final CommonCodeSessionBootstrapPort? bootstrapPort =
+        _resolvedBootstrapPort ??
+        (service is CommonCodeSessionBootstrapPort
+            ? service as CommonCodeSessionBootstrapPort
+            : null);
+    if (bootstrapPort != null) {
       final bootstrappedSession = await _bootstrapLifecycle.bootstrap(
         request: CommonCodeSessionBootstrapRequest(
           defaultSessionId: _defaultSessionId,
@@ -241,7 +246,8 @@ final class HostDesktopSessionRuntime implements DesktopSessionRuntime {
     );
     if (restoredSession != null) {
       try {
-        service.restoreSession(restoredSession);
+        final restored = service.restoreSession(restoredSession);
+        _persistSessionMutationForResolvedService()?.call(restored);
         _currentSessionId = restoredSession.id;
         _isBootstrapped = true;
         return;
@@ -254,12 +260,34 @@ final class HostDesktopSessionRuntime implements DesktopSessionRuntime {
       sessionId: _defaultSessionId,
       activeHost: Host(id: _hostId),
     );
-    service.attachClient(
+    final attachedSession = service.attachClient(
       sessionId: _defaultSessionId,
       client: Client(id: _attachedClientId),
     );
+    _persistSessionMutationForResolvedService()?.call(attachedSession);
     _currentSessionId = _defaultSessionId;
     _isBootstrapped = true;
+  }
+
+  HostService _resolveService() {
+    final existingService = _service;
+    if (existingService != null) {
+      return existingService;
+    }
+
+    final injectedService = _hostService;
+    if (injectedService == null) {
+      throw StateError('HostDesktopSessionRuntime requires an injected HostService.');
+    }
+
+    _resolvedBootstrapPort = _bootstrapPort;
+    _resolvedPersistSessionMutation = _persistSessionMutation;
+    return _service = injectedService;
+  }
+
+  void Function(Session session)? _persistSessionMutationForResolvedService() {
+    _resolveService();
+    return _resolvedPersistSessionMutation;
   }
 
   bool _isStaleGeneration(int generation) {

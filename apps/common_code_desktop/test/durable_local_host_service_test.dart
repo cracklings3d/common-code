@@ -6,6 +6,8 @@ import 'package:common_code_desktop/src/desktop_session_runtime.dart';
 import 'package:common_code_domain/common_code_domain.dart';
 import 'package:common_code_persistence/common_code_persistence.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:host_core/host_core.dart';
+import 'package:host_in_memory/host_in_memory.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -140,8 +142,17 @@ void main() {
         final session = await _bootstrapService(service);
 
         expectSessionLike(session, _runningSessionWithNotifications());
+        final hostAdapter = InMemoryHostAdapter();
+        final hostService = hostAdapter as HostService;
+        final durableService = DurableLocalHostService.withAdapter(
+          hostAdapter: hostAdapter,
+          sessionStore: DurableLocalSessionStore.fromPersistenceComponents(
+            legacySnapshotStore: _MemoryLegacySnapshotStore(),
+            durableStorage: storage,
+          ),
+        );
         expectSessionLike(
-          service.readSession(session.id),
+          hostService.readSession(session.id),
           _runningSessionWithNotifications(),
         );
       },
@@ -411,25 +422,32 @@ void main() {
     test('durable write failure is observable and non-fatal', () async {
       final diagnostics = <DurableLocalHostDiagnosticCode>[];
       final storage = _MemoryDurableStorage();
-      final service = DurableLocalHostService(
-        durableStorage: storage,
-        legacySnapshotStore: _MemoryLegacySnapshotStore(),
+      final snapshotStore = _MemoryLegacySnapshotStore();
+      final hostAdapter = InMemoryHostAdapter();
+      final hostService = hostAdapter as HostService;
+      final durableService = DurableLocalHostService.withAdapter(
+        hostAdapter: hostAdapter,
+        sessionStore: DurableLocalSessionStore.fromPersistenceComponents(
+          legacySnapshotStore: snapshotStore,
+          durableStorage: storage,
+        ),
         diagnosticsSink: (diagnostic) => diagnostics.add(diagnostic.code),
       );
 
-      final session = await _bootstrapService(service);
+      final session = await _bootstrapService(durableService);
       storage.writeError = StateError('write boom');
 
-      final updated = service.submitTurn(
+      final updated = hostService.submitTurn(
         sessionId: session.id,
         client: const Client(id: desktopSessionRuntimeAttachedClientId),
         submittedText: 'hello',
       );
-      await service.sessionStore.waitForPendingPersistence();
+      durableService.queueSessionPersistence(updated);
+      await durableService.flushPendingWrites();
 
       expect(updated.activeTurn?.submittedText, 'hello');
       expect(
-        service.readSession(session.id).activeTurn?.submittedText,
+        hostService.readSession(session.id).activeTurn?.submittedText,
         'hello',
       );
       expect(
@@ -441,37 +459,49 @@ void main() {
     test(
       'restored queued and running turns remain frozen after restart',
       () async {
-        final queuedService = DurableLocalHostService(
-          durableStorage: _MemoryDurableStorage(
-            payload: jsonEncode(
-              const SessionSnapshotCodec().encode(_queuedSession()),
-            ),
+        final queuedStorage = _MemoryDurableStorage(
+          payload: jsonEncode(
+            const SessionSnapshotCodec().encode(_queuedSession()),
           ),
-          legacySnapshotStore: _MemoryLegacySnapshotStore(),
+        );
+        final queuedHostAdapter = InMemoryHostAdapter();
+        final queuedHostService = queuedHostAdapter as HostService;
+        final queuedService = DurableLocalHostService.withAdapter(
+          hostAdapter: queuedHostAdapter,
+          sessionStore: DurableLocalSessionStore.fromPersistenceComponents(
+            legacySnapshotStore: _MemoryLegacySnapshotStore(),
+            durableStorage: queuedStorage,
+          ),
         );
         final queuedSession = await _bootstrapService(queuedService);
         await Future<void>.delayed(Duration.zero);
         expect(queuedSession.activeTurn?.status, TurnStatus.queued);
         expect(
-          queuedService.readSession(queuedSession.id).activeTurn?.status,
+          queuedHostService.readSession(queuedSession.id).activeTurn?.status,
           TurnStatus.queued,
         );
 
-        final runningService = DurableLocalHostService(
-          durableStorage: _MemoryDurableStorage(
-            payload: jsonEncode(
-              const SessionSnapshotCodec().encode(
-                _runningSessionWithNotifications(),
-              ),
+        final runningStorage = _MemoryDurableStorage(
+          payload: jsonEncode(
+            const SessionSnapshotCodec().encode(
+              _runningSessionWithNotifications(),
             ),
           ),
-          legacySnapshotStore: _MemoryLegacySnapshotStore(),
+        );
+        final runningHostAdapter = InMemoryHostAdapter();
+        final runningHostService = runningHostAdapter as HostService;
+        final runningService = DurableLocalHostService.withAdapter(
+          hostAdapter: runningHostAdapter,
+          sessionStore: DurableLocalSessionStore.fromPersistenceComponents(
+            legacySnapshotStore: _MemoryLegacySnapshotStore(),
+            durableStorage: runningStorage,
+          ),
         );
         final runningSession = await _bootstrapService(runningService);
         await Future<void>.delayed(Duration.zero);
         expect(runningSession.activeTurn?.status, TurnStatus.running);
         expect(
-          runningService.readSession(runningSession.id).activeTurn?.status,
+          runningHostService.readSession(runningSession.id).activeTurn?.status,
           TurnStatus.running,
         );
       },
@@ -527,15 +557,21 @@ void main() {
     test(
       'live acknowledgement updates durable session notification state',
       () async {
-        final service = DurableLocalHostService(
-          durableStorage: _MemoryDurableStorage(
-            payload: jsonEncode(
-              const SessionSnapshotCodec().encode(
-                _runningSessionWithNotifications(),
-              ),
+        final storage = _MemoryDurableStorage(
+          payload: jsonEncode(
+            const SessionSnapshotCodec().encode(
+              _runningSessionWithNotifications(),
             ),
           ),
-          legacySnapshotStore: _MemoryLegacySnapshotStore(),
+        );
+        final hostAdapter = InMemoryHostAdapter();
+        final hostService = hostAdapter as HostService;
+        final service = DurableLocalHostService.withAdapter(
+          hostAdapter: hostAdapter,
+          sessionStore: DurableLocalSessionStore.fromPersistenceComponents(
+            legacySnapshotStore: _MemoryLegacySnapshotStore(),
+            durableStorage: storage,
+          ),
         );
 
         final session = await _bootstrapService(service);
@@ -543,11 +579,12 @@ void main() {
             .firstWhere((notification) => !notification.isAcknowledged)
             .id;
 
-        final acknowledgedSession = service.acknowledgeNotification(
+        final acknowledgedSession = hostService.acknowledgeNotification(
           sessionId: session.id,
           notificationId: notificationId,
         );
-        await service.sessionStore.waitForPendingPersistence();
+        service.queueSessionPersistence(acknowledgedSession);
+        await service.flushPendingWrites();
 
         expect(
           acknowledgedSession.notifications
@@ -556,7 +593,7 @@ void main() {
           isTrue,
         );
         expect(
-          service
+          hostService
               .readSession(session.id)
               .notifications
               .firstWhere((notification) => notification.id == notificationId)
@@ -793,13 +830,16 @@ final class _MemoryDurableStorage implements DurableSessionStore {
   }
 }
 
-final class _RejectingRestoreDurableLocalHostService
-    extends DurableLocalHostService {
+final class _RejectingRestoreDurableLocalHostService extends DurableLocalHostService {
   _RejectingRestoreDurableLocalHostService({
-    required super.legacySnapshotStore,
-    required super.durableStorage,
-    super.diagnosticsSink,
-  });
+    required Object? legacySnapshotStore,
+    required Object? durableStorage,
+    DurableLocalHostDiagnosticsSink? diagnosticsSink,
+  }) : super(
+         legacySnapshotStore: legacySnapshotStore,
+         durableStorage: durableStorage,
+         diagnosticsSink: diagnosticsSink,
+       );
 
   @override
   Session restoreDurableSession(Session session) {

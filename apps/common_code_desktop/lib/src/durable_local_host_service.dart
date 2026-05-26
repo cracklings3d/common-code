@@ -14,30 +14,42 @@ import 'package:host_in_memory/host_in_memory.dart';
 export 'package:common_code_observability/common_code_observability.dart';
 
 class DurableLocalHostService
-    implements HostService, CommonCodeSessionBootstrapPort {
+    implements CommonCodeSessionBootstrapPort {
   /// Creates a [DurableLocalHostService] with an injected [hostAdapter].
   ///
   /// Use this factory for new composition code.
-  factory DurableLocalHostService.withAdapter({
+  DurableLocalHostService.withAdapter({
     required InMemoryHostAdapter hostAdapter,
     CommonCodeSessionStore? sessionStore,
     Object? legacySnapshotStore,
     Object? durableStorage,
     Object? codec,
     DurableLocalHostDiagnosticsSink? diagnosticsSink,
-  }) {
-    return DurableLocalHostService._(
-      hostAdapter: hostAdapter,
-      sessionStore:
-          sessionStore ??
-          DurableLocalSessionStore.fromPersistenceComponents(
-            legacySnapshotStore: legacySnapshotStore,
-            durableStorage: durableStorage,
-            codec: codec,
-          ),
-      diagnosticsSink: diagnosticsSink,
-    );
-  }
+  }) : this.internal(
+         hostAdapter: hostAdapter,
+         sessionStore: sessionStore,
+         legacySnapshotStore: legacySnapshotStore,
+         durableStorage: durableStorage,
+         codec: codec,
+         diagnosticsSink: diagnosticsSink,
+       );
+
+  DurableLocalHostService.internal({
+    required InMemoryHostAdapter hostAdapter,
+    CommonCodeSessionStore? sessionStore,
+    Object? legacySnapshotStore,
+    Object? durableStorage,
+    Object? codec,
+    DurableLocalHostDiagnosticsSink? diagnosticsSink,
+  }) : _hostAdapter = hostAdapter,
+       sessionStore =
+           sessionStore ??
+           DurableLocalSessionStore.fromPersistenceComponents(
+             legacySnapshotStore: legacySnapshotStore,
+             durableStorage: durableStorage,
+             codec: codec,
+           ),
+       _diagnosticsSink = diagnosticsSink;
 
   /// Creates a [DurableLocalHostService] with an internal [InMemoryHostAdapter].
   ///
@@ -58,14 +70,7 @@ class DurableLocalHostService
              durableStorage: durableStorage,
              codec: codec,
            ),
-       _diagnosticsSink = diagnosticsSink;
-
-  DurableLocalHostService._({
-    required InMemoryHostAdapter hostAdapter,
-    required this.sessionStore,
-    required DurableLocalHostDiagnosticsSink? diagnosticsSink,
-  }) : _hostAdapter = hostAdapter,
-       _diagnosticsSink = diagnosticsSink;
+        _diagnosticsSink = diagnosticsSink;
 
   final InMemoryHostAdapter _hostAdapter;
   @override
@@ -75,6 +80,10 @@ class DurableLocalHostService
   String? _desktopClientIdForDurableWrites;
 
   Future<void> flushPendingWrites() => sessionStore.waitForPendingPersistence();
+
+  void queueSessionPersistence(Session session) {
+    _enqueueDurableWrite(session);
+  }
 
   @override
   Future<Session> createFreshSession(
@@ -234,69 +243,6 @@ class DurableLocalHostService
       );
       rethrow;
     }
-  }
-
-  @override
-  Session attachClient({required String sessionId, required Client client}) {
-    final session = _hostAdapter.attachClient(
-      sessionId: sessionId,
-      client: client,
-    );
-    _enqueueDurableWrite(session);
-    return session;
-  }
-
-  @override
-  Session acknowledgeNotification({
-    required String sessionId,
-    required String notificationId,
-  }) {
-    final session = _hostAdapter.acknowledgeNotification(
-      sessionId: sessionId,
-      notificationId: notificationId,
-    );
-    _enqueueDurableWrite(session);
-    return session;
-  }
-
-  @override
-  Session createSession({required String sessionId, required Host activeHost}) {
-    final session = _hostAdapter.createSession(
-      sessionId: sessionId,
-      activeHost: activeHost,
-    );
-    _enqueueDurableWrite(session);
-    return session;
-  }
-
-  @override
-  Session readSession(String sessionId) => _hostAdapter.readSession(sessionId);
-
-  @override
-  Session restoreSession(Session session) {
-    final restored = _hostAdapter.restoreSession(session);
-    _enqueueDurableWrite(restored);
-    return restored;
-  }
-
-  @override
-  Session submitTurn({
-    required String sessionId,
-    required Client client,
-    required String submittedText,
-  }) {
-    final session = _hostAdapter.submitTurn(
-      sessionId: sessionId,
-      client: client,
-      submittedText: submittedText,
-    );
-    _enqueueDurableWrite(session);
-    return session;
-  }
-
-  @override
-  Stream<Session> watchSession(String sessionId) {
-    return _hostAdapter.watchSession(sessionId);
   }
 
   Future<Session> _createFreshSession({
