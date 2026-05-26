@@ -50,18 +50,18 @@ final class HostDesktopSessionRuntime implements DesktopSessionRuntime {
     CommonCodeSessionBootstrapPort? bootstrapPort,
     SessionSnapshotStore? snapshotStore,
     void Function(Session session)? persistSessionMutation,
-    DurableLocalHostDiagnosticsSink? diagnosticsSink,
+    Object? diagnosticsSink,
     String defaultSessionId = desktopSessionRuntimeDefaultSessionId,
     String hostId = desktopSessionRuntimeHostId,
     String attachedClientId = desktopSessionRuntimeAttachedClientId,
   }) : _hostService = hostService,
        _bootstrapPort = bootstrapPort,
-        _legacySnapshotStore =
-            snapshotStore ?? SharedPreferencesSessionSnapshotStore(),
-        _persistSessionMutation = persistSessionMutation,
-        _defaultSessionId = defaultSessionId,
-        _hostId = hostId,
-        _attachedClientId = attachedClientId;
+       _legacySnapshotStore =
+           snapshotStore ?? SharedPreferencesSessionSnapshotStore(),
+       _persistSessionMutation = persistSessionMutation,
+       _defaultSessionId = defaultSessionId,
+       _hostId = hostId,
+       _attachedClientId = attachedClientId;
 
   final HostService? _hostService;
   final CommonCodeSessionBootstrapPort? _bootstrapPort;
@@ -277,7 +277,9 @@ final class HostDesktopSessionRuntime implements DesktopSessionRuntime {
 
     final injectedService = _hostService;
     if (injectedService == null) {
-      throw StateError('HostDesktopSessionRuntime requires an injected HostService.');
+      throw StateError(
+        'HostDesktopSessionRuntime requires an injected HostService.',
+      );
     }
 
     _resolvedBootstrapPort = _bootstrapPort;

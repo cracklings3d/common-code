@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:common_code_desktop/src/desktop_session_runtime.dart';
 import 'package:common_code_desktop/src/durable_local_host_service.dart';
 import 'package:common_code_domain/common_code_domain.dart';
+import 'package:common_code_observability/common_code_observability.dart';
 import 'package:common_code_persistence/common_code_persistence.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:host_core/host_core.dart';
@@ -111,7 +112,9 @@ void main() {
         snapshotStore: _MemoryLegacySnapshotStore(
           storedSession: _completedSessionWithNotifications(),
         ),
-        diagnosticsSink: (diagnostic) => diagnostics.add(diagnostic.code),
+        diagnosticsSink: DurableLocalHostDiagnosticsEmitter(
+          (diagnostic) => diagnostics.add(diagnostic.code),
+        ),
       );
       Session? snapshot;
       runtime.bind(
@@ -143,7 +146,9 @@ void main() {
         snapshotStore: _MemoryLegacySnapshotStore(
           storedSession: _completedSessionWithNotifications(),
         ),
-        diagnosticsSink: (diagnostic) => diagnostics.add(diagnostic.code),
+        diagnosticsSink: DurableLocalHostDiagnosticsEmitter(
+          (diagnostic) => diagnostics.add(diagnostic.code),
+        ),
       );
       Session? snapshot;
       runtime.bind(
@@ -247,9 +252,9 @@ void main() {
       );
 
       await firstRuntime.initialize();
-      final acknowledgedNotificationId = firstSnapshot!.notifications.firstWhere(
-        (notification) => !notification.isAcknowledged,
-      ).id;
+      final acknowledgedNotificationId = firstSnapshot!.notifications
+          .firstWhere((notification) => !notification.isAcknowledged)
+          .id;
 
       final acknowledgedSession = firstHostService.acknowledgeNotification(
         sessionId: firstSnapshot!.id,
@@ -271,9 +276,11 @@ void main() {
       await restartedRuntime.initialize();
 
       expect(
-        restartedSnapshot!.notifications.firstWhere(
-          (notification) => notification.id == acknowledgedNotificationId,
-        ).isAcknowledged,
+        restartedSnapshot!.notifications
+            .firstWhere(
+              (notification) => notification.id == acknowledgedNotificationId,
+            )
+            .isAcknowledged,
         isTrue,
       );
       expect(
@@ -293,7 +300,7 @@ HostService? _lastCreatedHostService;
 HostService _createDurableHostAdapter({
   required Object? durableStorage,
   required SessionSnapshotStore snapshotStore,
-  DurableLocalHostDiagnosticsSink? diagnosticsSink,
+  DurableLocalHostDiagnosticsPort? diagnosticsPort,
 }) {
   final hostAdapter = InMemoryHostAdapter();
   final hostService = hostAdapter as HostService;
@@ -303,7 +310,7 @@ HostService _createDurableHostAdapter({
       legacySnapshotStore: snapshotStore,
       durableStorage: durableStorage,
     ),
-    diagnosticsSink: diagnosticsSink,
+    diagnosticsPort: diagnosticsPort,
   );
   _lastCreatedSnapshotStore = snapshotStore;
   _lastCreatedDurableService = durableService;
@@ -314,12 +321,12 @@ HostService _createDurableHostAdapter({
 HostDesktopSessionRuntime _createDurableRuntime({
   required Object? durableStorage,
   required SessionSnapshotStore snapshotStore,
-  DurableLocalHostDiagnosticsSink? diagnosticsSink,
+  DurableLocalHostDiagnosticsPort? diagnosticsPort,
 }) {
   final hostService = _createDurableHostAdapter(
     durableStorage: durableStorage,
     snapshotStore: snapshotStore,
-    diagnosticsSink: diagnosticsSink,
+    diagnosticsSink: diagnosticsPort,
   );
   return HostDesktopSessionRuntime(
     hostService: hostService,

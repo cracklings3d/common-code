@@ -20,5 +20,6 @@ final class DurableLocalHostDiagnostic {
   final StackTrace? stackTrace;
 }
 
-typedef DurableLocalHostDiagnosticsSink =
-    void Function(DurableLocalHostDiagnostic diagnostic);
+abstract interface class DurableLocalHostDiagnosticsPort {
+  void emit(DurableLocalHostDiagnostic diagnostic);
+}
