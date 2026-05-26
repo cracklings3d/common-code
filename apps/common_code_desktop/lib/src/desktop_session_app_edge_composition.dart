@@ -8,7 +8,6 @@ import 'package:host_core/host_core.dart';
 import 'package:host_in_memory/host_in_memory.dart';
 
 import 'desktop_session_runtime.dart';
-import 'desktop_session_runtime_constants.dart';
 import 'durable_local_host_service.dart';
 
 CommonCodeSessionFacade createDesktopSessionFacade({
