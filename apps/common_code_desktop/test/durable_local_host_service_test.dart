@@ -4,6 +4,7 @@ import 'package:common_code_application/common_code_application.dart';
 import 'package:common_code_desktop/src/durable_local_host_service.dart';
 import 'package:common_code_desktop/src/desktop_session_runtime.dart';
 import 'package:common_code_domain/common_code_domain.dart';
+import 'package:common_code_observability/common_code_observability.dart';
 import 'package:common_code_persistence/common_code_persistence.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:host_core/host_core.dart';
@@ -20,7 +21,9 @@ void main() {
         legacySnapshotStore: _MemoryLegacySnapshotStore(
           storedSession: _completedSession(),
         ),
-        diagnosticsSink: (diagnostic) => diagnostics.add(diagnostic.code),
+        diagnosticsPort: DurableLocalHostDiagnosticsEmitter(
+          (diagnostic) => diagnostics.add(diagnostic.code),
+        ),
       );
 
       final session = await _bootstrapService(service);
@@ -73,7 +76,9 @@ void main() {
           legacySnapshotStore: _MemoryLegacySnapshotStore(
             storedSession: _completedSession(),
           ),
-          diagnosticsSink: (diagnostic) => diagnostics.add(diagnostic.code),
+          diagnosticsPort: DurableLocalHostDiagnosticsEmitter(
+            (diagnostic) => diagnostics.add(diagnostic.code),
+          ),
         );
 
         final session = await _bootstrapService(service);
@@ -105,7 +110,9 @@ void main() {
         final service = DurableLocalHostService(
           durableStorage: _MemoryDurableStorage(),
           legacySnapshotStore: _MemoryLegacySnapshotStore(),
-          diagnosticsSink: (diagnostic) => diagnostics.add(diagnostic.code),
+          diagnosticsPort: DurableLocalHostDiagnosticsEmitter(
+            (diagnostic) => diagnostics.add(diagnostic.code),
+          ),
         );
 
         final session = await _bootstrapService(service);
@@ -165,7 +172,9 @@ void main() {
         legacySnapshotStore: _MemoryLegacySnapshotStore(
           storedSession: _completedSession(),
         ),
-        diagnosticsSink: (diagnostic) => diagnostics.add(diagnostic.code),
+        diagnosticsPort: DurableLocalHostDiagnosticsEmitter(
+          (diagnostic) => diagnostics.add(diagnostic.code),
+        ),
       );
 
       final session = await _bootstrapService(service);
@@ -188,7 +197,9 @@ void main() {
         final service = DurableLocalHostService(
           durableStorage: _MemoryDurableStorage(payload: '{bad-json'),
           legacySnapshotStore: _MemoryLegacySnapshotStore(),
-          diagnosticsSink: (diagnostic) => diagnostics.add(diagnostic.code),
+          diagnosticsPort: DurableLocalHostDiagnosticsEmitter(
+            (diagnostic) => diagnostics.add(diagnostic.code),
+          ),
         );
 
         final session = await _bootstrapService(service);
@@ -218,7 +229,9 @@ void main() {
           legacySnapshotStore: _MemoryLegacySnapshotStore(
             storedSession: _completedSession(),
           ),
-          diagnosticsSink: (diagnostic) => diagnostics.add(diagnostic.code),
+          diagnosticsPort: DurableLocalHostDiagnosticsEmitter(
+            (diagnostic) => diagnostics.add(diagnostic.code),
+          ),
         );
 
         final session = await _bootstrapService(service);
@@ -250,7 +263,9 @@ void main() {
           legacySnapshotStore: _MemoryLegacySnapshotStore(
             storedSession: _completedSession(),
           ),
-          diagnosticsSink: (diagnostic) => diagnostics.add(diagnostic.code),
+          diagnosticsPort: DurableLocalHostDiagnosticsEmitter(
+            (diagnostic) => diagnostics.add(diagnostic.code),
+          ),
         );
 
         final session = await _bootstrapService(service);
@@ -284,7 +299,9 @@ void main() {
         legacySnapshotStore: _MemoryLegacySnapshotStore(
           storedSession: _completedSession(),
         ),
-        diagnosticsSink: (diagnostic) => diagnostics.add(diagnostic.code),
+        diagnosticsPort: DurableLocalHostDiagnosticsEmitter(
+          (diagnostic) => diagnostics.add(diagnostic.code),
+        ),
       );
 
       final session = await _bootstrapService(service);
@@ -310,7 +327,7 @@ void main() {
           legacySnapshotStore: _MemoryLegacySnapshotStore(
             storedSession: _completedSession(),
           ),
-          diagnosticsSink: diagnostics.add,
+          diagnosticsPort: DurableLocalHostDiagnosticsEmitter(diagnostics.add),
         );
 
         await _bootstrapService(service);
@@ -336,7 +353,7 @@ void main() {
           legacySnapshotStore: _MemoryLegacySnapshotStore(
             storedSession: _completedSession(),
           ),
-          diagnosticsSink: diagnostics.add,
+          diagnosticsPort: DurableLocalHostDiagnosticsEmitter(diagnostics.add),
         );
 
         await _bootstrapService(service);
@@ -362,7 +379,9 @@ void main() {
           legacySnapshotStore: _MemoryLegacySnapshotStore(
             storedSession: _completedSession(),
           ),
-          diagnosticsSink: (diagnostic) => diagnostics.add(diagnostic.code),
+          diagnosticsPort: DurableLocalHostDiagnosticsEmitter(
+            (diagnostic) => diagnostics.add(diagnostic.code),
+          ),
         );
 
         final session = await _bootstrapService(service);
@@ -399,7 +418,9 @@ void main() {
         legacySnapshotStore: _MemoryLegacySnapshotStore(
           storedSession: _completedSession(),
         ),
-        diagnosticsSink: (diagnostic) => diagnostics.add(diagnostic.code),
+        diagnosticsPort: DurableLocalHostDiagnosticsEmitter(
+          (diagnostic) => diagnostics.add(diagnostic.code),
+        ),
       );
 
       final session = await _bootstrapService(service);
@@ -431,7 +452,9 @@ void main() {
           legacySnapshotStore: snapshotStore,
           durableStorage: storage,
         ),
-        diagnosticsSink: (diagnostic) => diagnostics.add(diagnostic.code),
+        diagnosticsPort: DurableLocalHostDiagnosticsEmitter(
+          (diagnostic) => diagnostics.add(diagnostic.code),
+        ),
       );
 
       final session = await _bootstrapService(durableService);
@@ -627,7 +650,9 @@ void main() {
         final nextService = DurableLocalHostService(
           durableStorage: storage,
           legacySnapshotStore: legacyStore,
-          diagnosticsSink: (diagnostic) => nextDiagnostics.add(diagnostic.code),
+          diagnosticsPort: DurableLocalHostDiagnosticsEmitter(
+            (diagnostic) => nextDiagnostics.add(diagnostic.code),
+          ),
         );
 
         final freshSession = await _bootstrapService(nextService);
@@ -830,15 +855,16 @@ final class _MemoryDurableStorage implements DurableSessionStore {
   }
 }
 
-final class _RejectingRestoreDurableLocalHostService extends DurableLocalHostService {
+final class _RejectingRestoreDurableLocalHostService
+    extends DurableLocalHostService {
   _RejectingRestoreDurableLocalHostService({
     required Object? legacySnapshotStore,
     required Object? durableStorage,
-    DurableLocalHostDiagnosticsSink? diagnosticsSink,
+    DurableLocalHostDiagnosticsPort? diagnosticsPort,
   }) : super(
          legacySnapshotStore: legacySnapshotStore,
          durableStorage: durableStorage,
-         diagnosticsSink: diagnosticsSink,
+         diagnosticsPort: diagnosticsPort,
        );
 
   @override

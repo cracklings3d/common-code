@@ -5,6 +5,7 @@ import 'package:common_code_application/common_code_application.dart';
 import 'package:common_code_desktop/src/desktop_session_runtime.dart';
 import 'package:common_code_desktop/src/durable_local_host_service.dart';
 import 'package:common_code_domain/common_code_domain.dart';
+import 'package:common_code_observability/common_code_observability.dart';
 import 'package:common_code_persistence/common_code_persistence.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:host_core/host_core.dart';
@@ -23,7 +24,9 @@ void main() {
       final diagnostics = <DurableLocalHostDiagnosticCode>[];
       final runtime = _createDurableRuntime(
         snapshotStore: _MemoryLegacySnapshotStore(),
-        diagnosticsSink: (diagnostic) => diagnostics.add(diagnostic.code),
+        diagnosticsSink: DurableLocalHostDiagnosticsEmitter(
+          (diagnostic) => diagnostics.add(diagnostic.code),
+        ),
       );
       final snapshots = <Session>[];
       runtime.bind(
@@ -56,7 +59,9 @@ void main() {
         final runtime = _createDurableRuntime(
           durableStorage: durableStorage,
           snapshotStore: snapshotStore,
-          diagnosticsSink: (diagnostic) => diagnostics.add(diagnostic.code),
+          diagnosticsSink: DurableLocalHostDiagnosticsEmitter(
+            (diagnostic) => diagnostics.add(diagnostic.code),
+          ),
         );
         Session? snapshot;
         runtime.bind(
@@ -97,7 +102,9 @@ void main() {
         final runtime = _createDurableRuntime(
           durableStorage: durableStorage,
           snapshotStore: snapshotStore,
-          diagnosticsSink: (diagnostic) => diagnostics.add(diagnostic.code),
+          diagnosticsSink: DurableLocalHostDiagnosticsEmitter(
+            (diagnostic) => diagnostics.add(diagnostic.code),
+          ),
         );
         Session? snapshot;
         runtime.bind(
@@ -132,7 +139,9 @@ void main() {
         final runtime = _createDurableRuntime(
           durableStorage: durableStorage,
           snapshotStore: _MemoryLegacySnapshotStore(),
-          diagnosticsSink: (diagnostic) => diagnostics.add(diagnostic.code),
+          diagnosticsSink: DurableLocalHostDiagnosticsEmitter(
+            (diagnostic) => diagnostics.add(diagnostic.code),
+          ),
         );
         Session? snapshot;
         runtime.bind(
@@ -168,7 +177,9 @@ void main() {
           snapshotStore: _MemoryLegacySnapshotStore(
             storedSession: _completedSession(),
           ),
-          diagnosticsSink: (diagnostic) => diagnostics.add(diagnostic.code),
+          diagnosticsSink: DurableLocalHostDiagnosticsEmitter(
+            (diagnostic) => diagnostics.add(diagnostic.code),
+          ),
         );
         Session? snapshot;
         runtime.bind(
@@ -202,7 +213,9 @@ void main() {
           snapshotStore: _MemoryLegacySnapshotStore(
             storedSession: _completedSession(),
           ),
-          diagnosticsSink: (diagnostic) => diagnostics.add(diagnostic.code),
+          diagnosticsSink: DurableLocalHostDiagnosticsEmitter(
+            (diagnostic) => diagnostics.add(diagnostic.code),
+          ),
         );
         Session? snapshot;
         runtime.bind(
@@ -408,7 +421,9 @@ void main() {
           snapshotStore: _MemoryLegacySnapshotStore(
             storedSession: _completedSession(),
           ),
-          diagnosticsSink: (diagnostic) => diagnostics.add(diagnostic.code),
+          diagnosticsSink: DurableLocalHostDiagnosticsEmitter(
+            (diagnostic) => diagnostics.add(diagnostic.code),
+          ),
         );
         Session? snapshot;
         runtime.bind(
@@ -447,7 +462,9 @@ void main() {
             legacySnapshotStore: _MemoryLegacySnapshotStore(),
             durableStorage: storage,
           ),
-          diagnosticsSink: (diagnostic) => diagnostics.add(diagnostic.code),
+          diagnosticsSink: DurableLocalHostDiagnosticsEmitter(
+            (diagnostic) => diagnostics.add(diagnostic.code),
+          ),
         );
         final runtime = HostDesktopSessionRuntime(
           hostService: hostService,
@@ -578,11 +595,7 @@ final class _FailingLegacySnapshotStore implements SessionSnapshotStore {
 }
 
 final class _MemoryDurableStorage implements DurableSessionStore {
-  _MemoryDurableStorage({
-    this.payload,
-    this.readError,
-    this.writeError,
-  });
+  _MemoryDurableStorage({this.payload, this.readError, this.writeError});
 
   String? payload;
   bool legacySeedEnabled = true;
@@ -808,7 +821,10 @@ final class _BootstrapPortSessionStore implements CommonCodeSessionStore {
   }
 
   @override
-  Future<void> persistSession(Session session, {String? attachedClientId}) async {}
+  Future<void> persistSession(
+    Session session, {
+    String? attachedClientId,
+  }) async {}
 
   @override
   Future<void> queueSessionPersistence(
@@ -823,7 +839,7 @@ final class _BootstrapPortSessionStore implements CommonCodeSessionStore {
 HostDesktopSessionRuntime _createDurableRuntime({
   SessionSnapshotStore? snapshotStore,
   Object? durableStorage,
-  DurableLocalHostDiagnosticsSink? diagnosticsSink,
+  DurableLocalHostDiagnosticsPort? diagnosticsPort,
 }) {
   final effectiveSnapshotStore = snapshotStore ?? _MemoryLegacySnapshotStore();
   final hostAdapter = InMemoryHostAdapter();
@@ -833,7 +849,7 @@ HostDesktopSessionRuntime _createDurableRuntime({
       legacySnapshotStore: effectiveSnapshotStore,
       durableStorage: durableStorage,
     ),
-    diagnosticsSink: diagnosticsSink,
+    diagnosticsPort: diagnosticsPort,
   );
   return HostDesktopSessionRuntime(
     hostService: hostAdapter as HostService,
@@ -846,7 +862,7 @@ HostDesktopSessionRuntime _createDurableRuntime({
 HostDesktopSessionRuntime _createRejectingDurableRuntime({
   required SessionSnapshotStore snapshotStore,
   required Object? durableStorage,
-  DurableLocalHostDiagnosticsSink? diagnosticsSink,
+  DurableLocalHostDiagnosticsPort? diagnosticsPort,
 }) {
   final hostAdapter = InMemoryHostAdapter();
   final bootstrapPort = _RejectingRestoreDurableLocalHostService.withAdapter(
@@ -856,7 +872,7 @@ HostDesktopSessionRuntime _createRejectingDurableRuntime({
       durableStorage: durableStorage,
     ),
     durableStorage: durableStorage,
-    diagnosticsSink: diagnosticsSink,
+    diagnosticsPort: diagnosticsPort,
   );
   return HostDesktopSessionRuntime(
     hostService: hostAdapter as HostService,
@@ -866,21 +882,22 @@ HostDesktopSessionRuntime _createRejectingDurableRuntime({
   );
 }
 
-final class _RejectingRestoreDurableLocalHostService extends DurableLocalHostService {
+final class _RejectingRestoreDurableLocalHostService
+    extends DurableLocalHostService {
   _RejectingRestoreDurableLocalHostService.withAdapter({
     required dynamic hostAdapter,
     CommonCodeSessionStore? sessionStore,
     Object? legacySnapshotStore,
     Object? durableStorage,
     Object? codec,
-    DurableLocalHostDiagnosticsSink? diagnosticsSink,
+    DurableLocalHostDiagnosticsPort? diagnosticsPort,
   }) : super.withAdapter(
          hostAdapter: hostAdapter,
          sessionStore: sessionStore,
          legacySnapshotStore: legacySnapshotStore,
          durableStorage: durableStorage,
          codec: codec,
-         diagnosticsSink: diagnosticsSink,
+         diagnosticsPort: diagnosticsPort,
        );
 
   @override

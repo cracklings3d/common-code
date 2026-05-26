@@ -4,17 +4,11 @@ import 'dart:async';
 
 import 'package:common_code_application/common_code_application.dart';
 import 'package:common_code_domain/common_code_domain.dart';
-import 'package:common_code_observability/common_code_observability.dart';
 import 'package:common_code_persistence/common_code_persistence.dart';
 import 'package:host_core/host_core.dart';
 import 'package:host_in_memory/host_in_memory.dart';
 
-// Re-export diagnostics types for backwards compatibility with consumers
-// that import from DurableLocalHostService.
-export 'package:common_code_observability/common_code_observability.dart';
-
-class DurableLocalHostService
-    implements CommonCodeSessionBootstrapPort {
+class DurableLocalHostService implements CommonCodeSessionBootstrapPort {
   /// Creates a [DurableLocalHostService] with an injected [hostAdapter].
   ///
   /// Use this factory for new composition code.
@@ -24,14 +18,14 @@ class DurableLocalHostService
     Object? legacySnapshotStore,
     Object? durableStorage,
     Object? codec,
-    DurableLocalHostDiagnosticsSink? diagnosticsSink,
+    DurableLocalHostDiagnosticsPort? diagnosticsPort,
   }) : this.internal(
          hostAdapter: hostAdapter,
          sessionStore: sessionStore,
          legacySnapshotStore: legacySnapshotStore,
          durableStorage: durableStorage,
          codec: codec,
-         diagnosticsSink: diagnosticsSink,
+         diagnosticsPort: diagnosticsPort,
        );
 
   DurableLocalHostService.internal({
@@ -40,7 +34,7 @@ class DurableLocalHostService
     Object? legacySnapshotStore,
     Object? durableStorage,
     Object? codec,
-    DurableLocalHostDiagnosticsSink? diagnosticsSink,
+    DurableLocalHostDiagnosticsPort? diagnosticsPort,
   }) : _hostAdapter = hostAdapter,
        sessionStore =
            sessionStore ??
@@ -49,7 +43,7 @@ class DurableLocalHostService
              durableStorage: durableStorage,
              codec: codec,
            ),
-       _diagnosticsSink = diagnosticsSink;
+       _diagnosticsPort = diagnosticsPort;
 
   /// Creates a [DurableLocalHostService] with an internal [InMemoryHostAdapter].
   ///
@@ -61,21 +55,23 @@ class DurableLocalHostService
     Object? codec,
     HostExecutionSimulationPolicy simulationPolicy =
         const HostExecutionSimulationPolicy(),
-    DurableLocalHostDiagnosticsSink? diagnosticsSink,
+    DurableLocalHostDiagnosticsPort? diagnosticsPort,
   }) : _hostAdapter = InMemoryHostAdapter(simulationPolicy: simulationPolicy),
        sessionStore =
-            sessionStore ??
-            DurableLocalSessionStore.fromPersistenceComponents(
-              legacySnapshotStore: legacySnapshotStore,
+           sessionStore ??
+           DurableLocalSessionStore.fromPersistenceComponents(
+             legacySnapshotStore: legacySnapshotStore,
              durableStorage: durableStorage,
              codec: codec,
            ),
-        _diagnosticsSink = diagnosticsSink;
+       _diagnosticsPort = diagnosticsPort;
 
   final InMemoryHostAdapter _hostAdapter;
+
   @override
   final CommonCodeSessionStore sessionStore;
-  final DurableLocalHostDiagnosticsSink? _diagnosticsSink;
+
+  final DurableLocalHostDiagnosticsPort? _diagnosticsPort;
 
   String? _desktopClientIdForDurableWrites;
 
@@ -104,33 +100,33 @@ class DurableLocalHostService
     );
     switch (legacySeed.status) {
       case CommonCodeLegacySeedLoadStatus.available:
-        _emit(
+        _diagnosticsPort?.emit(
           const DurableLocalHostDiagnostic(
             DurableLocalHostDiagnosticCode.legacySeedActivated,
           ),
         );
         return legacySeed;
       case CommonCodeLegacySeedLoadStatus.disabled:
-        _emit(
+        _diagnosticsPort?.emit(
           const DurableLocalHostDiagnostic(
             DurableLocalHostDiagnosticCode.legacySeedSkipped,
           ),
         );
         return legacySeed;
       case CommonCodeLegacySeedLoadStatus.missing:
-        _emit(
+        _diagnosticsPort?.emit(
           const DurableLocalHostDiagnostic(
             DurableLocalHostDiagnosticCode.legacySeedActivated,
           ),
         );
-        _emit(
+        _diagnosticsPort?.emit(
           const DurableLocalHostDiagnostic(
             DurableLocalHostDiagnosticCode.legacySeedFailed,
           ),
         );
         return legacySeed;
       case CommonCodeLegacySeedLoadStatus.failed:
-        _emit(
+        _diagnosticsPort?.emit(
           DurableLocalHostDiagnostic(
             DurableLocalHostDiagnosticCode.legacySeedFailed,
             error: legacySeed.error,
@@ -151,21 +147,21 @@ class DurableLocalHostService
       case CommonCodeDurableBootstrapLoadStatus.available:
         return durableCandidate;
       case CommonCodeDurableBootstrapLoadStatus.missing:
-        _emit(
+        _diagnosticsPort?.emit(
           const DurableLocalHostDiagnostic(
             DurableLocalHostDiagnosticCode.durableReadMissing,
           ),
         );
         return durableCandidate;
       case CommonCodeDurableBootstrapLoadStatus.invalid:
-        _emit(
+        _diagnosticsPort?.emit(
           const DurableLocalHostDiagnostic(
             DurableLocalHostDiagnosticCode.durableReadCorruptOrInvalid,
           ),
         );
         return durableCandidate;
       case CommonCodeDurableBootstrapLoadStatus.readFailed:
-        _emit(
+        _diagnosticsPort?.emit(
           DurableLocalHostDiagnostic(
             DurableLocalHostDiagnosticCode.durableReadFailed,
             error: durableCandidate.error,
@@ -192,7 +188,7 @@ class DurableLocalHostService
           attachedClientId: attachedClientId,
         );
       } catch (error, stackTrace) {
-        _emit(
+        _diagnosticsPort?.emit(
           DurableLocalHostDiagnostic(
             DurableLocalHostDiagnosticCode.legacySeedFailed,
             error: error,
@@ -203,7 +199,7 @@ class DurableLocalHostService
         rethrow;
       }
 
-      _emit(
+      _diagnosticsPort?.emit(
         const DurableLocalHostDiagnostic(
           DurableLocalHostDiagnosticCode.legacySeedSucceeded,
         ),
@@ -211,7 +207,7 @@ class DurableLocalHostService
       return restoredSession;
     } catch (error, stackTrace) {
       if (!emittedLegacySeedFailure) {
-        _emit(
+        _diagnosticsPort?.emit(
           DurableLocalHostDiagnostic(
             DurableLocalHostDiagnosticCode.legacySeedFailed,
             error: error,
@@ -227,14 +223,14 @@ class DurableLocalHostService
   Session restoreDurableSession(Session session) {
     try {
       final restoredSession = _hostAdapter.restoreSession(session);
-      _emit(
+      _diagnosticsPort?.emit(
         const DurableLocalHostDiagnostic(
           DurableLocalHostDiagnosticCode.durableReadRestored,
         ),
       );
       return restoredSession;
     } catch (error, stackTrace) {
-      _emit(
+      _diagnosticsPort?.emit(
         DurableLocalHostDiagnostic(
           DurableLocalHostDiagnosticCode.durableRestoreFailed,
           error: error,
@@ -250,7 +246,7 @@ class DurableLocalHostService
     required String hostId,
     required String desktopClientId,
   }) async {
-    _emit(
+    _diagnosticsPort?.emit(
       const DurableLocalHostDiagnostic(
         DurableLocalHostDiagnosticCode.freshBootstrapActivated,
       ),
@@ -277,10 +273,6 @@ class DurableLocalHostService
     return attachedSession;
   }
 
-  void _emit(DurableLocalHostDiagnostic diagnostic) {
-    _diagnosticsSink?.call(diagnostic);
-  }
-
   void _enqueueDurableWrite(Session session) {
     unawaited(
       sessionStore
@@ -289,13 +281,13 @@ class DurableLocalHostService
             attachedClientId: _desktopClientIdForDurableWrites,
           )
           .catchError((Object error, StackTrace stackTrace) {
-          _emit(
-            DurableLocalHostDiagnostic(
-              DurableLocalHostDiagnosticCode.durableWriteFailed,
-              error: error,
-              stackTrace: stackTrace,
-            ),
-          );
+            _diagnosticsPort?.emit(
+              DurableLocalHostDiagnostic(
+                DurableLocalHostDiagnosticCode.durableWriteFailed,
+                error: error,
+                stackTrace: stackTrace,
+              ),
+            );
           }),
     );
   }
@@ -310,7 +302,7 @@ class DurableLocalHostService
         attachedClientId: attachedClientId,
       );
     } catch (error, stackTrace) {
-      _emit(
+      _diagnosticsPort?.emit(
         DurableLocalHostDiagnostic(
           DurableLocalHostDiagnosticCode.durableWriteFailed,
           error: error,

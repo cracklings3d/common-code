@@ -2,12 +2,13 @@
 
 import 'package:common_code_application/common_code_application.dart';
 import 'package:common_code_domain/common_code_domain.dart';
+import 'package:common_code_observability/common_code_observability.dart';
 import 'package:common_code_persistence/common_code_persistence.dart';
 import 'package:host_core/host_core.dart';
 import 'package:host_in_memory/host_in_memory.dart';
 
-import 'desktop_session_runtime_constants.dart';
 import 'desktop_session_runtime.dart';
+import 'desktop_session_runtime_constants.dart';
 import 'durable_local_host_service.dart';
 
 CommonCodeSessionFacade createDesktopSessionFacade({
@@ -24,6 +25,9 @@ CommonCodeSessionFacade createDesktopSessionFacade({
   String defaultSessionId = desktopSessionRuntimeDefaultSessionId,
   String hostId = desktopSessionRuntimeHostId,
 }) {
+  final diagnosticsPort = resolveDurableLocalHostDiagnosticsPort(
+    diagnosticsSink,
+  );
   final SessionSnapshotStore effectiveSnapshotStore =
       (snapshotStore as SessionSnapshotStore?) ??
       SharedPreferencesSessionSnapshotStore();
@@ -45,7 +49,7 @@ CommonCodeSessionFacade createDesktopSessionFacade({
     final durableService = DurableLocalHostService.withAdapter(
       hostAdapter: hostAdapter,
       sessionStore: effectiveSessionStore,
-      diagnosticsSink: diagnosticsSink as DurableLocalHostDiagnosticsSink?,
+      diagnosticsPort: diagnosticsPort,
     );
     effectiveHostService = hostAdapter as HostService;
     effectiveBootstrapPort = durableService;
@@ -63,10 +67,11 @@ CommonCodeSessionFacade createDesktopSessionFacade({
         hostId: hostId,
         attachedClientId: attachedClientId,
       );
-  final HostCoreDesktopSessionDriver? hostCoreDriver = switch (effectiveDriver) {
-    HostCoreDesktopSessionDriver driver => driver,
-    _ => null,
-  };
+  final HostCoreDesktopSessionDriver? hostCoreDriver =
+      switch (effectiveDriver) {
+        HostCoreDesktopSessionDriver driver => driver,
+        _ => null,
+      };
   final effectiveGateway =
       hostGateway ??
       (hostCoreDriver == null
@@ -96,13 +101,16 @@ HostDesktopSessionRuntime createDesktopSessionRuntime({
   SessionSnapshotStore? snapshotStore,
   void Function(Session session)? persistSessionMutation,
   Object? durableStorage,
-  DurableLocalHostDiagnosticsSink? diagnosticsSink,
+  Object? diagnosticsSink,
   String defaultSessionId = desktopSessionRuntimeDefaultSessionId,
   String hostId = desktopSessionRuntimeHostId,
   String attachedClientId = desktopSessionRuntimeAttachedClientId,
 }) {
   final effectiveSnapshotStore =
       snapshotStore ?? SharedPreferencesSessionSnapshotStore();
+  final diagnosticsPort = resolveDurableLocalHostDiagnosticsPort(
+    diagnosticsSink,
+  );
 
   if (hostService != null) {
     return HostDesktopSessionRuntime(
@@ -123,7 +131,7 @@ HostDesktopSessionRuntime createDesktopSessionRuntime({
       legacySnapshotStore: effectiveSnapshotStore,
       durableStorage: durableStorage,
     ),
-    diagnosticsSink: diagnosticsSink,
+    diagnosticsPort: diagnosticsPort,
   );
   return HostDesktopSessionRuntime(
     hostService: hostAdapter as HostService,
@@ -147,12 +155,12 @@ final class HostCoreDesktopSessionDriver
     String hostId = desktopSessionRuntimeHostId,
     String attachedClientId = desktopSessionRuntimeAttachedClientId,
   }) : _hostService = hostService,
-        _bootstrapPort = bootstrapPort,
-        _persistSessionMutation = persistSessionMutation,
-        _sessionStore = sessionStore ?? DurableLocalSessionStore(),
-        _defaultSessionId = defaultSessionId,
-        _hostId = hostId,
-        _attachedClientId = attachedClientId;
+       _bootstrapPort = bootstrapPort,
+       _persistSessionMutation = persistSessionMutation,
+       _sessionStore = sessionStore ?? DurableLocalSessionStore(),
+       _defaultSessionId = defaultSessionId,
+       _hostId = hostId,
+       _attachedClientId = attachedClientId;
 
   final HostService? _hostService;
   final CommonCodeSessionBootstrapPort? _bootstrapPort;
@@ -214,7 +222,6 @@ final class HostCoreDesktopSessionDriver
     return service.watchSession(sessionId);
   }
 
-  /// Returns the shared HostService instance used by this driver.
   HostService get sharedService => _resolveService();
 
   void Function(Session session)? get persistSessionMutation {
@@ -292,14 +299,12 @@ final class HostCoreDesktopSessionDriver
       return _service = injectedService;
     }
 
-    throw StateError('HostCoreDesktopSessionDriver requires an injected HostService.');
+    throw StateError(
+      'HostCoreDesktopSessionDriver requires an injected HostService.',
+    );
   }
 }
 
-/// Host gateway adapter that delegates to HostService.submitTurn.
-///
-/// This is the desktop-specific implementation of [HostGateway] that
-/// wraps the transitional HostService boundary.
 final class _HostCoreDesktopHostGateway implements HostGateway {
   _HostCoreDesktopHostGateway({
     required HostService Function() serviceProvider,
