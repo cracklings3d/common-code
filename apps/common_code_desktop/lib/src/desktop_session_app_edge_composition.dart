@@ -1,13 +1,12 @@
 // ignore_for_file: implementation_imports
 
 import 'package:common_code_application/common_code_application.dart';
-import 'package:common_code_application/src/common_code_session_bootstrap.dart';
 import 'package:common_code_domain/common_code_domain.dart';
 import 'package:common_code_observability/common_code_observability.dart';
+import 'package:common_code_persistence/common_code_persistence.dart';
 import 'package:host_core/host_core.dart';
 
 import 'desktop_session_runtime_constants.dart';
-import 'desktop_session_snapshot_store.dart';
 import 'durable_local_host_service.dart';
 
 CommonCodeSessionFacade createDesktopSessionFacade({
@@ -27,8 +26,8 @@ CommonCodeSessionFacade createDesktopSessionFacade({
       driver ??
       HostCoreDesktopSessionDriver(
         hostService: hostService as HostService?,
-        snapshotStore: snapshotStore as DesktopSessionSnapshotStore?,
-        durableStorage: durableStorage as DurableLocalHostStorage?,
+        snapshotStore: snapshotStore as SessionSnapshotStore?,
+        durableStorage: durableStorage as DurableSessionStore?,
         hostServiceFactory: hostServiceFactory == null
             ? null
             : () => hostServiceFactory() as HostService,
@@ -37,7 +36,8 @@ CommonCodeSessionFacade createDesktopSessionFacade({
         hostId: hostId,
         attachedClientId: attachedClientId,
       );
-  final effectiveGateway = hostGateway ??
+  final effectiveGateway =
+      hostGateway ??
       _HostCoreDesktopHostGateway(
         serviceProvider: () =>
             (effectiveDriver as HostCoreDesktopSessionDriver).sharedService,
@@ -45,8 +45,7 @@ CommonCodeSessionFacade createDesktopSessionFacade({
 
   return CommonCodeSessionFacade(
     driver: effectiveDriver,
-    observation:
-        observation ?? effectiveDriver as CommonCodeSessionObservation,
+    observation: observation ?? effectiveDriver as CommonCodeSessionObservation,
     hostGateway: effectiveGateway,
     attachedClientId: attachedClientId,
   );
@@ -56,35 +55,31 @@ final class HostCoreDesktopSessionDriver
     implements CommonCodeSessionDriver, CommonCodeSessionObservation {
   HostCoreDesktopSessionDriver({
     HostService? hostService,
-    DesktopSessionSnapshotStore? snapshotStore,
-    DurableLocalHostStorage? durableStorage,
+    SessionSnapshotStore? snapshotStore,
+    DurableSessionStore? durableStorage,
     HostService Function()? hostServiceFactory,
     DurableLocalHostDiagnosticsSink? diagnosticsSink,
     String defaultSessionId = desktopSessionRuntimeDefaultSessionId,
     String hostId = desktopSessionRuntimeHostId,
     String attachedClientId = desktopSessionRuntimeAttachedClientId,
   }) : _hostService = hostService,
-       _legacySnapshotStore =
-           snapshotStore ?? SharedPreferencesDesktopSessionSnapshotStore(),
-       _durableStorage =
-           durableStorage ?? SharedPreferencesDurableLocalHostStorage(),
-       _hostServiceFactory =
-           hostServiceFactory ??
-           (() => DurableLocalHostService(
-             legacySnapshotStore:
-                 snapshotStore ??
-                 SharedPreferencesDesktopSessionSnapshotStore(),
-             durableStorage:
-                 durableStorage ?? SharedPreferencesDurableLocalHostStorage(),
-             diagnosticsSink: diagnosticsSink,
-           )),
-       _defaultSessionId = defaultSessionId,
+        _legacySnapshotStore =
+            snapshotStore ?? SharedPreferencesSessionSnapshotStore(),
+        _hostServiceFactory =
+            hostServiceFactory ??
+            (() => DurableLocalHostService(
+              legacySnapshotStore:
+                  snapshotStore ?? SharedPreferencesSessionSnapshotStore(),
+              durableStorage:
+                  durableStorage ?? SharedPreferencesDurableSessionStore(),
+              diagnosticsSink: diagnosticsSink,
+            )),
+        _defaultSessionId = defaultSessionId,
        _hostId = hostId,
        _attachedClientId = attachedClientId;
 
   final HostService? _hostService;
-  final DesktopSessionSnapshotStore _legacySnapshotStore;
-  final DurableLocalHostStorage _durableStorage;
+  final SessionSnapshotStore _legacySnapshotStore;
   final HostService Function() _hostServiceFactory;
   final String _defaultSessionId;
   final String _hostId;
@@ -93,8 +88,8 @@ final class HostCoreDesktopSessionDriver
   HostService? _service;
   bool _isBootstrapped = false;
   String? _currentSessionId;
-  static const CommonCodeSessionBootstrapOrchestrator _bootstrapOrchestrator =
-      CommonCodeSessionBootstrapOrchestrator();
+  final CommonCodeSessionBootstrapLifecycle _bootstrapLifecycle =
+      CommonCodeSessionBootstrapLifecycle();
 
   @override
   Future<CommonCodeSessionBinding> ensureSession() async {
@@ -139,7 +134,8 @@ final class HostCoreDesktopSessionDriver
   }
 
   /// Returns the shared HostService instance used by this driver.
-  HostService get sharedService => _service ??= _hostService ?? _hostServiceFactory();
+  HostService get sharedService =>
+      _service ??= _hostService ?? _hostServiceFactory();
 
   Future<void> _bootstrapIfNeeded() async {
     final service = _service ??= _hostService ?? _hostServiceFactory();
@@ -147,20 +143,14 @@ final class HostCoreDesktopSessionDriver
       return;
     }
 
-    if (service case final DurableLocalHostService durableService) {
-      final bootstrappedSession = await _bootstrapOrchestrator.bootstrap(
+    if (service case final CommonCodeSessionBootstrapPort bootstrapPort) {
+      final bootstrappedSession = await _bootstrapLifecycle.bootstrap(
         request: CommonCodeSessionBootstrapRequest(
           defaultSessionId: _defaultSessionId,
           hostId: _hostId,
           attachedClientId: _attachedClientId,
         ),
-        isBootstrapped: durableService.isBootstrapped,
-        readBootstrappedSession: durableService.readBootstrappedSession,
-        loadDurableSessionCandidate: durableService.loadDurableSessionCandidate,
-        restoreDurableSession: durableService.restoreDurableSession,
-        loadLegacySeedSession: durableService.loadLegacySeedSession,
-        restoreLegacySeededSession: durableService.restoreLegacySeededSession,
-        createFreshSession: durableService.createFreshSession,
+        port: bootstrapPort,
       );
       _currentSessionId = bootstrappedSession.id;
       _isBootstrapped = true;
@@ -199,9 +189,8 @@ final class HostCoreDesktopSessionDriver
 /// This is the desktop-specific implementation of [HostGateway] that
 /// wraps the transitional HostService boundary.
 final class _HostCoreDesktopHostGateway implements HostGateway {
-  _HostCoreDesktopHostGateway({
-    required HostService Function() serviceProvider,
-  }) : _serviceProvider = serviceProvider;
+  _HostCoreDesktopHostGateway({required HostService Function() serviceProvider})
+    : _serviceProvider = serviceProvider;
 
   final HostService Function() _serviceProvider;
 

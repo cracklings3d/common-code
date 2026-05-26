@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 
+import 'package:common_code_application/common_code_application.dart';
 import 'package:common_code_desktop/src/desktop_session_runtime_constants.dart';
 import 'package:common_code_desktop/src/desktop_session_runtime.dart';
 import 'package:common_code_desktop/src/durable_local_host_service.dart';
@@ -53,8 +54,10 @@ void main() {
           storedSession: _completedSession(),
         );
         final runtime = HostDesktopSessionRuntime(
-          hostServiceFactory: () =>
-              DurableLocalHostService(durableStorage: durableStorage),
+          hostServiceFactory: () => DurableLocalHostService(
+            durableStorage: durableStorage,
+            diagnosticsSink: (diagnostic) => diagnostics.add(diagnostic.code),
+          ),
           snapshotStore: snapshotStore,
         );
         Session? snapshot;
@@ -94,8 +97,10 @@ void main() {
         );
         durableStorage.legacySeedEnabled = false;
         final runtime = HostDesktopSessionRuntime(
-          hostServiceFactory: () =>
-              DurableLocalHostService(durableStorage: durableStorage),
+          hostServiceFactory: () => DurableLocalHostService(
+            durableStorage: durableStorage,
+            diagnosticsSink: (diagnostic) => diagnostics.add(diagnostic.code),
+          ),
           snapshotStore: snapshotStore,
         );
         Session? snapshot;
@@ -129,8 +134,10 @@ void main() {
         final diagnostics = <DurableLocalHostDiagnosticCode>[];
         final durableStorage = _MemoryDurableStorage(payload: '{bad-json');
         final runtime = HostDesktopSessionRuntime(
-          hostServiceFactory: () =>
-              DurableLocalHostService(durableStorage: durableStorage),
+          hostServiceFactory: () => DurableLocalHostService(
+            durableStorage: durableStorage,
+            diagnosticsSink: (diagnostic) => diagnostics.add(diagnostic.code),
+          ),
           snapshotStore: _MemoryLegacySnapshotStore(),
         );
         Session? snapshot;
@@ -163,8 +170,10 @@ void main() {
           readError: StateError('read failed'),
         );
         final runtime = HostDesktopSessionRuntime(
-          hostServiceFactory: () =>
-              DurableLocalHostService(durableStorage: durableStorage),
+          hostServiceFactory: () => DurableLocalHostService(
+            durableStorage: durableStorage,
+            diagnosticsSink: (diagnostic) => diagnostics.add(diagnostic.code),
+          ),
           snapshotStore: _MemoryLegacySnapshotStore(
             storedSession: _completedSession(),
           ),
@@ -261,6 +270,36 @@ void main() {
         _runningSessionWithNotifications().notifications,
       );
     });
+
+    test(
+      'initialize uses bootstrap port lifecycle without durable concrete type',
+      () async {
+        final hostService = _BootstrapPortHostService(
+          bootstrappedSession: _completedSession(),
+        );
+        final runtime = HostDesktopSessionRuntime(
+          hostService: hostService,
+          snapshotStore: _FailingLegacySnapshotStore(),
+        );
+        Session? snapshot;
+        runtime.bind(
+          onSnapshot: (session) => snapshot = session,
+          onWatchError: (error, stackTrace) {},
+        );
+
+        await runtime.initialize();
+        await runtime.refresh();
+
+        expect(snapshot, isNotNull);
+        expect(snapshot!.id, 'restored-session');
+        expect(hostService.loadDurableCalls, 1);
+        expect(hostService.restoreDurableCalls, 1);
+        expect(hostService.watchStarts, 2);
+        expect(hostService.createCalls, 0);
+        expect(hostService.attachCalls, 0);
+        expect(hostService.restoreCalls, 1);
+      },
+    );
 
     test(
       'watch path establishes cached identity context before subscription',
@@ -521,6 +560,16 @@ final class _MemoryLegacySnapshotStore implements SessionSnapshotStore {
   Future<void> writeLatestSession(Session session) async {}
 }
 
+final class _FailingLegacySnapshotStore implements SessionSnapshotStore {
+  @override
+  Future<Session?> readLatestSession({required String desktopClientId}) {
+    throw StateError('legacy snapshot path should not be used');
+  }
+
+  @override
+  Future<void> writeLatestSession(Session session) async {}
+}
+
 final class _MemoryDurableStorage implements DurableSessionStore {
   _MemoryDurableStorage({
     this.payload,
@@ -692,6 +741,53 @@ final class _TrackingHostService implements HostService {
       },
     );
     return controller.stream;
+  }
+}
+
+final class _BootstrapPortHostService extends _TrackingHostService
+    implements CommonCodeSessionBootstrapPort {
+  _BootstrapPortHostService({required Session bootstrappedSession})
+    : _bootstrappedSession = bootstrappedSession;
+
+  final Session _bootstrappedSession;
+
+  int loadDurableCalls = 0;
+  int restoreDurableCalls = 0;
+
+  @override
+  Future<Session> createFreshSession(
+    CommonCodeSessionBootstrapRequest request,
+  ) async {
+    throw StateError('fresh bootstrap should not be used');
+  }
+
+  @override
+  Future<CommonCodeDurableBootstrapLoadResult> loadDurableSessionCandidate({
+    required String attachedClientId,
+  }) async {
+    loadDurableCalls += 1;
+    return CommonCodeDurableBootstrapLoadResult.available(_bootstrappedSession);
+  }
+
+  @override
+  Future<CommonCodeLegacySeedLoadResult> loadLegacySeedSession({
+    required String attachedClientId,
+  }) async {
+    throw StateError('legacy seed path should not be used');
+  }
+
+  @override
+  Session restoreDurableSession(Session session) {
+    restoreDurableCalls += 1;
+    return restoreSession(session);
+  }
+
+  @override
+  Future<Session> restoreLegacySeededSession({
+    required Session session,
+    required String attachedClientId,
+  }) async {
+    throw StateError('legacy seed restore should not be used');
   }
 }
 
