@@ -2,7 +2,6 @@
 
 import 'package:common_code_application/common_code_application.dart';
 import 'package:common_code_domain/common_code_domain.dart';
-import 'package:common_code_observability/common_code_observability.dart';
 import 'package:common_code_persistence/common_code_persistence.dart';
 import 'package:host_core/host_core.dart';
 
@@ -26,8 +25,10 @@ CommonCodeSessionFacade createDesktopSessionFacade({
       driver ??
       HostCoreDesktopSessionDriver(
         hostService: hostService as HostService?,
-        snapshotStore: snapshotStore as SessionSnapshotStore?,
-        durableStorage: durableStorage as DurableSessionStore?,
+        sessionStore: DurableLocalSessionStore.fromPersistenceComponents(
+          legacySnapshotStore: snapshotStore,
+          durableStorage: durableStorage,
+        ),
         hostServiceFactory: hostServiceFactory == null
             ? null
             : () => hostServiceFactory() as HostService,
@@ -55,23 +56,18 @@ final class HostCoreDesktopSessionDriver
     implements CommonCodeSessionDriver, CommonCodeSessionObservation {
   HostCoreDesktopSessionDriver({
     HostService? hostService,
-    SessionSnapshotStore? snapshotStore,
-    DurableSessionStore? durableStorage,
+    CommonCodeSessionStore? sessionStore,
     HostService Function()? hostServiceFactory,
     DurableLocalHostDiagnosticsSink? diagnosticsSink,
     String defaultSessionId = desktopSessionRuntimeDefaultSessionId,
     String hostId = desktopSessionRuntimeHostId,
     String attachedClientId = desktopSessionRuntimeAttachedClientId,
   }) : _hostService = hostService,
-        _legacySnapshotStore =
-            snapshotStore ?? SharedPreferencesSessionSnapshotStore(),
+        _sessionStore = sessionStore ?? DurableLocalSessionStore(),
         _hostServiceFactory =
             hostServiceFactory ??
             (() => DurableLocalHostService(
-              legacySnapshotStore:
-                  snapshotStore ?? SharedPreferencesSessionSnapshotStore(),
-              durableStorage:
-                  durableStorage ?? SharedPreferencesDurableSessionStore(),
+              sessionStore: sessionStore ?? DurableLocalSessionStore(),
               diagnosticsSink: diagnosticsSink,
             )),
         _defaultSessionId = defaultSessionId,
@@ -79,7 +75,7 @@ final class HostCoreDesktopSessionDriver
        _attachedClientId = attachedClientId;
 
   final HostService? _hostService;
-  final SessionSnapshotStore _legacySnapshotStore;
+  final CommonCodeSessionStore _sessionStore;
   final HostService Function() _hostServiceFactory;
   final String _defaultSessionId;
   final String _hostId;
@@ -157,11 +153,13 @@ final class HostCoreDesktopSessionDriver
       return;
     }
 
-    final restoredSession = await _legacySnapshotStore.readLatestSession(
-      desktopClientId: _attachedClientId,
+    final legacySeed = await _sessionStore.loadLegacySeedSession(
+      attachedClientId: _attachedClientId,
     );
+    final restoredSession = legacySeed.session;
     if (restoredSession != null) {
       try {
+        // ignore: deprecated_member_use
         service.restoreSession(restoredSession);
         _currentSessionId = restoredSession.id;
         _isBootstrapped = true;
@@ -171,10 +169,12 @@ final class HostCoreDesktopSessionDriver
       }
     }
 
+    // ignore: deprecated_member_use
     service.createSession(
       sessionId: _defaultSessionId,
       activeHost: Host(id: _hostId),
     );
+    // ignore: deprecated_member_use
     service.attachClient(
       sessionId: _defaultSessionId,
       client: Client(id: _attachedClientId),

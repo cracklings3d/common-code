@@ -95,7 +95,7 @@ void main() {
       );
 
       await runtime.initialize();
-      await hostService.flushPendingWrites();
+      await hostService.sessionStore.waitForPendingPersistence();
 
       expectSessionLike(snapshot!, _completedSessionWithNotifications());
       expect(storage.payload, isNotNull);
@@ -256,10 +256,11 @@ void main() {
         (notification) => !notification.isAcknowledged,
       ).id;
 
-      await firstRuntime.acknowledgeNotification(
+      firstHostService.acknowledgeNotification(
+        sessionId: firstSnapshot!.id,
         notificationId: acknowledgedNotificationId,
       );
-      await firstHostService.flushPendingWrites();
+      await firstHostService.sessionStore.waitForPendingPersistence();
 
       final restartedRuntime = HostDesktopSessionRuntime(
         hostService: DurableLocalHostService(

@@ -2,7 +2,6 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:common_code_application/common_code_application.dart';
-import 'package:common_code_desktop/src/desktop_session_runtime_constants.dart';
 import 'package:common_code_desktop/src/desktop_session_runtime.dart';
 import 'package:common_code_desktop/src/durable_local_host_service.dart';
 import 'package:common_code_domain/common_code_domain.dart';
@@ -458,7 +457,7 @@ void main() {
         storage.writeError = StateError('write failed');
 
         await runtime.submitTurn(submittedText: 'persist me');
-        await hostService.flushPendingWrites();
+        await hostService.sessionStore.waitForPendingPersistence();
 
         expect(snapshot, isNotNull);
         expect(
@@ -573,13 +572,12 @@ final class _FailingLegacySnapshotStore implements SessionSnapshotStore {
 final class _MemoryDurableStorage implements DurableSessionStore {
   _MemoryDurableStorage({
     this.payload,
-    this.legacySeedEnabled = true,
     this.readError,
     this.writeError,
   });
 
   String? payload;
-  bool legacySeedEnabled;
+  bool legacySeedEnabled = true;
   Object? readError;
   Object? writeError;
 
@@ -755,25 +753,13 @@ final class _BootstrapPortHostService extends _TrackingHostService
   int restoreDurableCalls = 0;
 
   @override
+  CommonCodeSessionStore get sessionStore => _BootstrapPortSessionStore(this);
+
+  @override
   Future<Session> createFreshSession(
     CommonCodeSessionBootstrapRequest request,
   ) async {
     throw StateError('fresh bootstrap should not be used');
-  }
-
-  @override
-  Future<CommonCodeDurableBootstrapLoadResult> loadDurableSessionCandidate({
-    required String attachedClientId,
-  }) async {
-    loadDurableCalls += 1;
-    return CommonCodeDurableBootstrapLoadResult.available(_bootstrappedSession);
-  }
-
-  @override
-  Future<CommonCodeLegacySeedLoadResult> loadLegacySeedSession({
-    required String attachedClientId,
-  }) async {
-    throw StateError('legacy seed path should not be used');
   }
 
   @override
@@ -789,6 +775,41 @@ final class _BootstrapPortHostService extends _TrackingHostService
   }) async {
     throw StateError('legacy seed restore should not be used');
   }
+}
+
+final class _BootstrapPortSessionStore implements CommonCodeSessionStore {
+  const _BootstrapPortSessionStore(this.hostService);
+
+  final _BootstrapPortHostService hostService;
+
+  @override
+  Future<CommonCodeDurableBootstrapLoadResult> loadDurableSessionCandidate({
+    required String attachedClientId,
+  }) async {
+    hostService.loadDurableCalls += 1;
+    return CommonCodeDurableBootstrapLoadResult.available(
+      hostService._bootstrappedSession,
+    );
+  }
+
+  @override
+  Future<CommonCodeLegacySeedLoadResult> loadLegacySeedSession({
+    required String attachedClientId,
+  }) async {
+    throw StateError('legacy seed path should not be used');
+  }
+
+  @override
+  Future<void> persistSession(Session session, {String? attachedClientId}) async {}
+
+  @override
+  Future<void> queueSessionPersistence(
+    Session session, {
+    String? attachedClientId,
+  }) async {}
+
+  @override
+  Future<void> waitForPendingPersistence() async {}
 }
 
 final class _RejectingRestoreDurableLocalHostService

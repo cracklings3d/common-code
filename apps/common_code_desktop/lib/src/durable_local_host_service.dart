@@ -1,12 +1,11 @@
 // ignore_for_file: implementation_imports
 
 import 'dart:async';
-import 'dart:convert';
 
+import 'package:common_code_application/common_code_application.dart';
 import 'package:common_code_domain/common_code_domain.dart';
 import 'package:common_code_observability/common_code_observability.dart';
 import 'package:common_code_persistence/common_code_persistence.dart';
-import 'package:common_code_application/common_code_application.dart';
 import 'package:host_core/host_core.dart';
 import 'package:host_in_memory/host_in_memory.dart';
 
@@ -21,17 +20,21 @@ class DurableLocalHostService
   /// Use this factory for new composition code.
   factory DurableLocalHostService.withAdapter({
     required InMemoryHostAdapter hostAdapter,
-    SessionSnapshotStore? legacySnapshotStore,
-    DurableSessionStore? durableStorage,
-    SessionSnapshotCodec codec = const SessionSnapshotCodec(),
+    CommonCodeSessionStore? sessionStore,
+    Object? legacySnapshotStore,
+    Object? durableStorage,
+    Object? codec,
     DurableLocalHostDiagnosticsSink? diagnosticsSink,
   }) {
     return DurableLocalHostService._(
       hostAdapter: hostAdapter,
-      legacySnapshotStore:
-          legacySnapshotStore ?? SharedPreferencesSessionSnapshotStore(),
-      durableStorage: durableStorage ?? SharedPreferencesDurableSessionStore(),
-      codec: codec,
+      sessionStore:
+          sessionStore ??
+          DurableLocalSessionStore.fromPersistenceComponents(
+            legacySnapshotStore: legacySnapshotStore,
+            durableStorage: durableStorage,
+            codec: codec,
+          ),
       diagnosticsSink: diagnosticsSink,
     );
   }
@@ -40,42 +43,38 @@ class DurableLocalHostService
   ///
   /// For backward compatibility with existing tests and composition.
   DurableLocalHostService({
-    SessionSnapshotStore? legacySnapshotStore,
-    DurableSessionStore? durableStorage,
-    SessionSnapshotCodec codec = const SessionSnapshotCodec(),
+    CommonCodeSessionStore? sessionStore,
+    Object? legacySnapshotStore,
+    Object? durableStorage,
+    Object? codec,
     HostExecutionSimulationPolicy simulationPolicy =
         const HostExecutionSimulationPolicy(),
     DurableLocalHostDiagnosticsSink? diagnosticsSink,
   }) : _hostAdapter = InMemoryHostAdapter(simulationPolicy: simulationPolicy),
-       _legacySnapshotStore =
-           legacySnapshotStore ?? SharedPreferencesSessionSnapshotStore(),
-       _durableStorage =
-           durableStorage ?? SharedPreferencesDurableSessionStore(),
-       _codec = codec,
+       sessionStore =
+            sessionStore ??
+            DurableLocalSessionStore.fromPersistenceComponents(
+              legacySnapshotStore: legacySnapshotStore,
+             durableStorage: durableStorage,
+             codec: codec,
+           ),
        _diagnosticsSink = diagnosticsSink;
 
   DurableLocalHostService._({
     required InMemoryHostAdapter hostAdapter,
-    required SessionSnapshotStore legacySnapshotStore,
-    required DurableSessionStore durableStorage,
-    required SessionSnapshotCodec codec,
+    required this.sessionStore,
     required DurableLocalHostDiagnosticsSink? diagnosticsSink,
   }) : _hostAdapter = hostAdapter,
-       _legacySnapshotStore = legacySnapshotStore,
-       _durableStorage = durableStorage,
-       _codec = codec,
        _diagnosticsSink = diagnosticsSink;
 
   final InMemoryHostAdapter _hostAdapter;
-  final SessionSnapshotStore _legacySnapshotStore;
-  final DurableSessionStore _durableStorage;
-  final SessionSnapshotCodec _codec;
+  @override
+  final CommonCodeSessionStore sessionStore;
   final DurableLocalHostDiagnosticsSink? _diagnosticsSink;
 
-  Future<void> _writeSequence = Future<void>.value();
   String? _desktopClientIdForDurableWrites;
 
-  Future<void> flushPendingWrites() => _writeSequence;
+  Future<void> flushPendingWrites() => sessionStore.waitForPendingPersistence();
 
   @override
   Future<Session> createFreshSession(
@@ -88,103 +87,83 @@ class DurableLocalHostService
     );
   }
 
-  @override
   Future<CommonCodeLegacySeedLoadResult> loadLegacySeedSession({
     required String attachedClientId,
   }) async {
-    _desktopClientIdForDurableWrites = attachedClientId;
-
-    try {
-      final isLegacySeedEnabled = await _durableStorage.isLegacySeedEnabled(
-        desktopClientId: attachedClientId,
-      );
-      if (!isLegacySeedEnabled) {
+    final legacySeed = await sessionStore.loadLegacySeedSession(
+      attachedClientId: attachedClientId,
+    );
+    switch (legacySeed.status) {
+      case CommonCodeLegacySeedLoadStatus.available:
+        _emit(
+          const DurableLocalHostDiagnostic(
+            DurableLocalHostDiagnosticCode.legacySeedActivated,
+          ),
+        );
+        return legacySeed;
+      case CommonCodeLegacySeedLoadStatus.disabled:
         _emit(
           const DurableLocalHostDiagnostic(
             DurableLocalHostDiagnosticCode.legacySeedSkipped,
           ),
         );
-        return const CommonCodeLegacySeedLoadResult.disabled();
-      }
-
-      _emit(
-        const DurableLocalHostDiagnostic(
-          DurableLocalHostDiagnosticCode.legacySeedActivated,
-        ),
-      );
-
-      final legacySession = await _legacySnapshotStore.readLatestSession(
-        desktopClientId: attachedClientId,
-      );
-      if (legacySession == null) {
+        return legacySeed;
+      case CommonCodeLegacySeedLoadStatus.missing:
+        _emit(
+          const DurableLocalHostDiagnostic(
+            DurableLocalHostDiagnosticCode.legacySeedActivated,
+          ),
+        );
         _emit(
           const DurableLocalHostDiagnostic(
             DurableLocalHostDiagnosticCode.legacySeedFailed,
           ),
         );
-        return const CommonCodeLegacySeedLoadResult.missing();
-      }
-
-      return CommonCodeLegacySeedLoadResult.available(legacySession);
-    } catch (error, stackTrace) {
-      _emit(
-        DurableLocalHostDiagnostic(
-          DurableLocalHostDiagnosticCode.legacySeedFailed,
-          error: error,
-          stackTrace: stackTrace,
-        ),
-      );
-      return const CommonCodeLegacySeedLoadResult.failed();
+        return legacySeed;
+      case CommonCodeLegacySeedLoadStatus.failed:
+        _emit(
+          DurableLocalHostDiagnostic(
+            DurableLocalHostDiagnosticCode.legacySeedFailed,
+            error: legacySeed.error,
+            stackTrace: legacySeed.stackTrace,
+          ),
+        );
+        return legacySeed;
     }
   }
 
-  @override
   Future<CommonCodeDurableBootstrapLoadResult> loadDurableSessionCandidate({
     required String attachedClientId,
   }) async {
-    _desktopClientIdForDurableWrites = attachedClientId;
-
-    try {
-      final encodedDurableSession = await _durableStorage.readSessionPayload();
-      if (encodedDurableSession == null) {
+    final durableCandidate = await sessionStore.loadDurableSessionCandidate(
+      attachedClientId: attachedClientId,
+    );
+    switch (durableCandidate.status) {
+      case CommonCodeDurableBootstrapLoadStatus.available:
+        return durableCandidate;
+      case CommonCodeDurableBootstrapLoadStatus.missing:
         _emit(
           const DurableLocalHostDiagnostic(
             DurableLocalHostDiagnosticCode.durableReadMissing,
           ),
         );
-        return const CommonCodeDurableBootstrapLoadResult.missing();
-      }
-
-      Session? decodedDurableSession;
-      try {
-        decodedDurableSession = _codec.decode(
-          jsonDecode(encodedDurableSession),
-          desktopClientId: attachedClientId,
-        );
-      } catch (_) {
-        // Decoding failed, will fall through to seedOrCreateFresh
-      }
-      if (decodedDurableSession == null) {
+        return durableCandidate;
+      case CommonCodeDurableBootstrapLoadStatus.invalid:
         _emit(
           const DurableLocalHostDiagnostic(
             DurableLocalHostDiagnosticCode.durableReadCorruptOrInvalid,
           ),
         );
-        return const CommonCodeDurableBootstrapLoadResult.invalid();
-      }
-
-      return CommonCodeDurableBootstrapLoadResult.available(
-        decodedDurableSession,
-      );
-    } catch (error, stackTrace) {
-      _emit(
-        DurableLocalHostDiagnostic(
-          DurableLocalHostDiagnosticCode.durableReadFailed,
-          error: error,
-          stackTrace: stackTrace,
-        ),
-      );
-      return const CommonCodeDurableBootstrapLoadResult.readFailed();
+        return durableCandidate;
+      case CommonCodeDurableBootstrapLoadStatus.readFailed:
+        _emit(
+          DurableLocalHostDiagnostic(
+            DurableLocalHostDiagnosticCode.durableReadFailed,
+            error: durableCandidate.error,
+            stackTrace: durableCandidate.stackTrace,
+          ),
+        );
+        return durableCandidate;
     }
   }
 
@@ -199,7 +178,10 @@ class DurableLocalHostService
     try {
       final restoredSession = _hostAdapter.restoreSession(session);
       try {
-        await _persistBootstrapSession(restoredSession);
+        await _persistBootstrapSession(
+          restoredSession,
+          attachedClientId: attachedClientId,
+        );
       } catch (error, stackTrace) {
         _emit(
           DurableLocalHostDiagnostic(
@@ -338,7 +320,10 @@ class DurableLocalHostService
     );
 
     try {
-      await _persistBootstrapSession(attachedSession);
+      await _persistBootstrapSession(
+        attachedSession,
+        attachedClientId: desktopClientId,
+      );
     } catch (_) {
       // Durable bootstrap write failures remain non-fatal to the live session.
     }
@@ -351,10 +336,13 @@ class DurableLocalHostService
   }
 
   void _enqueueDurableWrite(Session session) {
-    final encodedSession = jsonEncode(_codec.encode(session));
-    _writeSequence = _writeSequence
-        .then((_) => _writeDurableSessionPayload(encodedSession))
-        .catchError((Object error, StackTrace stackTrace) {
+    unawaited(
+      sessionStore
+          .queueSessionPersistence(
+            session,
+            attachedClientId: _desktopClientIdForDurableWrites,
+          )
+          .catchError((Object error, StackTrace stackTrace) {
           _emit(
             DurableLocalHostDiagnostic(
               DurableLocalHostDiagnosticCode.durableWriteFailed,
@@ -362,12 +350,19 @@ class DurableLocalHostService
               stackTrace: stackTrace,
             ),
           );
-        });
+          }),
+    );
   }
 
-  Future<void> _persistBootstrapSession(Session session) async {
+  Future<void> _persistBootstrapSession(
+    Session session, {
+    required String attachedClientId,
+  }) async {
     try {
-      await _writeDurableSessionPayload(jsonEncode(_codec.encode(session)));
+      await sessionStore.persistSession(
+        session,
+        attachedClientId: attachedClientId,
+      );
     } catch (error, stackTrace) {
       _emit(
         DurableLocalHostDiagnostic(
@@ -377,14 +372,6 @@ class DurableLocalHostService
         ),
       );
       rethrow;
-    }
-  }
-
-  Future<void> _writeDurableSessionPayload(String encodedSession) async {
-    await _durableStorage.writeSessionPayload(encodedSession);
-    final desktopClientId = _desktopClientIdForDurableWrites;
-    if (desktopClientId != null) {
-      await _durableStorage.disableLegacySeed(desktopClientId: desktopClientId);
     }
   }
 }

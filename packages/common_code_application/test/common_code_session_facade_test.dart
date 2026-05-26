@@ -1,9 +1,6 @@
 import 'dart:async';
 
 import 'package:common_code_application/common_code_application.dart';
-import 'package:common_code_application/src/common_code_session_bootstrap.dart';
-import 'package:common_code_application/src/common_code_session_observation.dart';
-import 'package:common_code_application/src/host_gateway.dart';
 import 'package:common_code_domain/common_code_domain.dart';
 import 'package:test/test.dart';
 
@@ -193,9 +190,9 @@ void main() {
             ),
             isBootstrapped: port.isBootstrapped,
             readBootstrappedSession: port.readBootstrappedSession,
-            loadDurableSessionCandidate: port.loadDurableSessionCandidate,
+            loadDurableSessionCandidate: port.sessionStore.loadDurableSessionCandidate,
             restoreDurableSession: port.restoreDurableSession,
-            loadLegacySeedSession: port.loadLegacySeedSession,
+            loadLegacySeedSession: port.sessionStore.loadLegacySeedSession,
             restoreLegacySeededSession: port.restoreLegacySeededSession,
             createFreshSession: port.createFreshSession,
           );
@@ -225,9 +222,9 @@ void main() {
               ),
               isBootstrapped: port.isBootstrapped,
               readBootstrappedSession: port.readBootstrappedSession,
-              loadDurableSessionCandidate: port.loadDurableSessionCandidate,
+              loadDurableSessionCandidate: port.sessionStore.loadDurableSessionCandidate,
               restoreDurableSession: port.restoreDurableSession,
-              loadLegacySeedSession: port.loadLegacySeedSession,
+              loadLegacySeedSession: port.sessionStore.loadLegacySeedSession,
               restoreLegacySeededSession: port.restoreLegacySeededSession,
               createFreshSession: port.createFreshSession,
             );
@@ -260,9 +257,9 @@ void main() {
               ),
               isBootstrapped: port.isBootstrapped,
               readBootstrappedSession: port.readBootstrappedSession,
-              loadDurableSessionCandidate: port.loadDurableSessionCandidate,
+              loadDurableSessionCandidate: port.sessionStore.loadDurableSessionCandidate,
               restoreDurableSession: port.restoreDurableSession,
-              loadLegacySeedSession: port.loadLegacySeedSession,
+              loadLegacySeedSession: port.sessionStore.loadLegacySeedSession,
               restoreLegacySeededSession: port.restoreLegacySeededSession,
               createFreshSession: port.createFreshSession,
             );
@@ -294,9 +291,9 @@ void main() {
             ),
             isBootstrapped: port.isBootstrapped,
             readBootstrappedSession: port.readBootstrappedSession,
-            loadDurableSessionCandidate: port.loadDurableSessionCandidate,
+            loadDurableSessionCandidate: port.sessionStore.loadDurableSessionCandidate,
             restoreDurableSession: port.restoreDurableSession,
-            loadLegacySeedSession: port.loadLegacySeedSession,
+            loadLegacySeedSession: port.sessionStore.loadLegacySeedSession,
             restoreLegacySeededSession: port.restoreLegacySeededSession,
             createFreshSession: port.createFreshSession,
           );
@@ -328,9 +325,9 @@ void main() {
               ),
               isBootstrapped: port.isBootstrapped,
               readBootstrappedSession: port.readBootstrappedSession,
-              loadDurableSessionCandidate: port.loadDurableSessionCandidate,
+              loadDurableSessionCandidate: port.sessionStore.loadDurableSessionCandidate,
               restoreDurableSession: port.restoreDurableSession,
-              loadLegacySeedSession: port.loadLegacySeedSession,
+              loadLegacySeedSession: port.sessionStore.loadLegacySeedSession,
               restoreLegacySeededSession: port.restoreLegacySeededSession,
               createFreshSession: port.createFreshSession,
             );
@@ -585,27 +582,14 @@ final class _FakeBootstrapPort implements CommonCodeSessionBootstrapPort {
   int restoreLegacyCalls = 0;
 
   @override
+  CommonCodeSessionStore get sessionStore => _FakeSessionStore(this);
+
+  @override
   Future<Session> createFreshSession(
     CommonCodeSessionBootstrapRequest request,
   ) async {
     createFreshCalls += 1;
     return _freshSession;
-  }
-
-  @override
-  Future<CommonCodeDurableBootstrapLoadResult> loadDurableSessionCandidate({
-    required String attachedClientId,
-  }) async {
-    loadDurableCalls += 1;
-    return durableResult;
-  }
-
-  @override
-  Future<CommonCodeLegacySeedLoadResult> loadLegacySeedSession({
-    required String attachedClientId,
-  }) async {
-    loadLegacyCalls += 1;
-    return legacyResult;
   }
 
   Session readBootstrappedSession() => _bootstrappedSession;
@@ -630,4 +614,38 @@ final class _FakeBootstrapPort implements CommonCodeSessionBootstrapPort {
     }
     return _restoredLegacySession;
   }
+}
+
+final class _FakeSessionStore implements CommonCodeSessionStore {
+  const _FakeSessionStore(this.port);
+
+  final _FakeBootstrapPort port;
+
+  @override
+  Future<CommonCodeDurableBootstrapLoadResult> loadDurableSessionCandidate({
+    required String attachedClientId,
+  }) async {
+    port.loadDurableCalls += 1;
+    return port.durableResult;
+  }
+
+  @override
+  Future<CommonCodeLegacySeedLoadResult> loadLegacySeedSession({
+    required String attachedClientId,
+  }) async {
+    port.loadLegacyCalls += 1;
+    return port.legacyResult;
+  }
+
+  @override
+  Future<void> persistSession(Session session, {String? attachedClientId}) async {}
+
+  @override
+  Future<void> queueSessionPersistence(
+    Session session, {
+    String? attachedClientId,
+  }) async {}
+
+  @override
+  Future<void> waitForPendingPersistence() async {}
 }
