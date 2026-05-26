@@ -1,15 +1,11 @@
 import 'package:common_code_domain/common_code_domain.dart';
 
+import 'common_code_session_store.dart';
+
 abstract interface class CommonCodeSessionBootstrapPort {
-  Future<CommonCodeDurableBootstrapLoadResult> loadDurableSessionCandidate({
-    required String attachedClientId,
-  });
+  CommonCodeSessionStore get sessionStore;
 
   Session restoreDurableSession(Session session);
-
-  Future<CommonCodeLegacySeedLoadResult> loadLegacySeedSession({
-    required String attachedClientId,
-  });
 
   Future<Session> restoreLegacySeededSession({
     required Session session,
@@ -42,6 +38,8 @@ final class CommonCodeDurableBootstrapLoadResult {
   const CommonCodeDurableBootstrapLoadResult._({
     required this.status,
     this.session,
+    this.error,
+    this.stackTrace,
   });
 
   const CommonCodeDurableBootstrapLoadResult.available(Session session)
@@ -56,17 +54,30 @@ final class CommonCodeDurableBootstrapLoadResult {
   const CommonCodeDurableBootstrapLoadResult.invalid()
     : this._(status: CommonCodeDurableBootstrapLoadStatus.invalid);
 
-  const CommonCodeDurableBootstrapLoadResult.readFailed()
-    : this._(status: CommonCodeDurableBootstrapLoadStatus.readFailed);
+  const CommonCodeDurableBootstrapLoadResult.readFailed({
+    Object? error,
+    StackTrace? stackTrace,
+  }) : this._(
+         status: CommonCodeDurableBootstrapLoadStatus.readFailed,
+         error: error,
+         stackTrace: stackTrace,
+       );
 
   final CommonCodeDurableBootstrapLoadStatus status;
   final Session? session;
+  final Object? error;
+  final StackTrace? stackTrace;
 }
 
 enum CommonCodeLegacySeedLoadStatus { available, disabled, missing, failed }
 
 final class CommonCodeLegacySeedLoadResult {
-  const CommonCodeLegacySeedLoadResult._({required this.status, this.session});
+  const CommonCodeLegacySeedLoadResult._({
+    required this.status,
+    this.session,
+    this.error,
+    this.stackTrace,
+  });
 
   const CommonCodeLegacySeedLoadResult.available(Session session)
     : this._(
@@ -80,11 +91,19 @@ final class CommonCodeLegacySeedLoadResult {
   const CommonCodeLegacySeedLoadResult.missing()
     : this._(status: CommonCodeLegacySeedLoadStatus.missing);
 
-  const CommonCodeLegacySeedLoadResult.failed()
-    : this._(status: CommonCodeLegacySeedLoadStatus.failed);
+  const CommonCodeLegacySeedLoadResult.failed({
+    Object? error,
+    StackTrace? stackTrace,
+  }) : this._(
+         status: CommonCodeLegacySeedLoadStatus.failed,
+         error: error,
+         stackTrace: stackTrace,
+       );
 
   final CommonCodeLegacySeedLoadStatus status;
   final Session? session;
+  final Object? error;
+  final StackTrace? stackTrace;
 }
 
 final class CommonCodeSessionBootstrapOrchestrator {
@@ -216,9 +235,9 @@ final class CommonCodeSessionBootstrapLifecycle {
       request: request,
       isBootstrapped: isBootstrapped,
       readBootstrappedSession: readBootstrappedSession,
-      loadDurableSessionCandidate: port.loadDurableSessionCandidate,
+      loadDurableSessionCandidate: port.sessionStore.loadDurableSessionCandidate,
       restoreDurableSession: port.restoreDurableSession,
-      loadLegacySeedSession: port.loadLegacySeedSession,
+      loadLegacySeedSession: port.sessionStore.loadLegacySeedSession,
       restoreLegacySeededSession: port.restoreLegacySeededSession,
       createFreshSession: port.createFreshSession,
     );

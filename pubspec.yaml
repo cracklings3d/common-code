@@ -9,5 +9,6 @@ workspace:
   - apps/common_code_desktop
   - packages/common_code_application
   - packages/common_code_domain
+  - packages/common_code_persistence
   - packages/common_code_observability
   - packages/host_core

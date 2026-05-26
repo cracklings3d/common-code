@@ -290,6 +290,56 @@ void main() {
     });
 
     test(
+      'durable read failure preserves error and stack trace diagnostics',
+      () async {
+        final diagnostics = <DurableLocalHostDiagnostic>[];
+        final readError = StateError('read boom');
+        final service = DurableLocalHostService(
+          durableStorage: _MemoryDurableStorage(readError: readError),
+          legacySnapshotStore: _MemoryLegacySnapshotStore(
+            storedSession: _completedSession(),
+          ),
+          diagnosticsSink: diagnostics.add,
+        );
+
+        await _bootstrapService(service);
+
+        final diagnostic = diagnostics.singleWhere(
+          (entry) =>
+              entry.code == DurableLocalHostDiagnosticCode.durableReadFailed,
+        );
+        expect(diagnostic.error, same(readError));
+        expect(diagnostic.stackTrace, isNotNull);
+      },
+    );
+
+    test(
+      'legacy seed load failure preserves error and stack trace diagnostics',
+      () async {
+        final diagnostics = <DurableLocalHostDiagnostic>[];
+        final eligibilityError = StateError('eligibility boom');
+        final service = DurableLocalHostService(
+          durableStorage: _MemoryDurableStorage(
+            eligibilityError: eligibilityError,
+          ),
+          legacySnapshotStore: _MemoryLegacySnapshotStore(
+            storedSession: _completedSession(),
+          ),
+          diagnosticsSink: diagnostics.add,
+        );
+
+        await _bootstrapService(service);
+
+        final diagnostic = diagnostics.singleWhere(
+          (entry) =>
+              entry.code == DurableLocalHostDiagnosticCode.legacySeedFailed,
+        );
+        expect(diagnostic.error, same(eligibilityError));
+        expect(diagnostic.stackTrace, isNotNull);
+      },
+    );
+
+    test(
       'bootstrap persist failure after legacy restore falls back fresh',
       () async {
         final diagnostics = <DurableLocalHostDiagnosticCode>[];
@@ -375,7 +425,7 @@ void main() {
         client: const Client(id: desktopSessionRuntimeAttachedClientId),
         submittedText: 'hello',
       );
-      await service.flushPendingWrites();
+      await service.sessionStore.waitForPendingPersistence();
 
       expect(updated.activeTurn?.submittedText, 'hello');
       expect(
@@ -497,7 +547,7 @@ void main() {
           sessionId: session.id,
           notificationId: notificationId,
         );
-        await service.flushPendingWrites();
+        await service.sessionStore.waitForPendingPersistence();
 
         expect(
           acknowledgedSession.notifications
