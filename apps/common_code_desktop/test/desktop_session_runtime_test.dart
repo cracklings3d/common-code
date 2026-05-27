@@ -395,7 +395,9 @@ void main() {
         final hostService = _TrackingHostService();
         final runtime = HostDesktopSessionRuntime(
           hostService: hostService,
-          snapshotStore: _MemoryLegacySnapshotStore(),
+          snapshotStore: _MemoryLegacySnapshotStore(
+            storedSession: _completedSession(),
+          ),
         );
         runtime.bind(
           onSnapshot: (session) {},
@@ -913,10 +915,10 @@ HostDesktopSessionRuntime _createRejectingDurableRuntime({
     legacySnapshotStore: snapshotStore,
     durableStorage: durableStorage,
   );
-  final bootstrapPort = _RejectingRestoreBootstrapPort(
+  final bootstrapPort = CommonCodeSessionBootstrapPortAdapter(
     sessionStore: sessionStore,
     host: CommonCodeSessionBootstrapHost(
-      restoreSession: hostAdapter.restoreSession,
+      restoreSession: (session) => throw StateError('restore rejected'),
       createSession: hostAdapter.createSession,
       attachClient: hostAdapter.attachClient,
     ),
@@ -935,37 +937,12 @@ HostDesktopSessionRuntime _createRejectingDurableRuntime({
 }
 
 void Function(Session session) _createPersistSessionMutation(
-  CommonCodeSessionStore sessionStore, {
+  DurableLocalSessionStore sessionStore, {
   required String attachedClientId,
   DurableLocalHostDiagnosticsPort? diagnosticsPort,
 }) {
-  return (Session session) {
-    unawaited(
-      sessionStore
-          .queueSessionPersistence(session, attachedClientId: attachedClientId)
-          .catchError((Object error, StackTrace stackTrace) {
-            diagnosticsPort?.emit(
-              DurableLocalHostDiagnostic(
-                DurableLocalHostDiagnosticCode.durableWriteFailed,
-                error: error,
-                stackTrace: stackTrace,
-              ),
-            );
-          }),
-    );
-  };
-}
-
-class _RejectingRestoreBootstrapPort
-    extends CommonCodeSessionBootstrapPortAdapter {
-  _RejectingRestoreBootstrapPort({
-    required super.sessionStore,
-    required super.host,
-    super.diagnosticsPort,
-  });
-
-  @override
-  Session restoreDurableSession(Session session) {
-    throw StateError('restore rejected');
-  }
+  return sessionStore.createPersistenceContinuation(
+    attachedClientId: attachedClientId,
+    onError: createDurableWriteFailureReporter(diagnosticsPort),
+  );
 }
