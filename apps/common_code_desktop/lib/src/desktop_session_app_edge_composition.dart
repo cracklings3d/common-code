@@ -1,5 +1,3 @@
-import 'dart:async';
-
 // ignore_for_file: implementation_imports
 
 import 'package:common_code_application/common_code_application.dart';
@@ -28,76 +26,81 @@ CommonCodeSessionFacade createDesktopSessionFacade({
   final diagnosticsPort = resolveDurableLocalHostDiagnosticsPort(
     diagnosticsSink,
   );
-  final SessionSnapshotStore effectiveSnapshotStore =
+  final effectiveSnapshotStore =
       (snapshotStore as SessionSnapshotStore?) ??
       SharedPreferencesSessionSnapshotStore();
-  final CommonCodeSessionStore effectiveSessionStore =
+  final effectiveSessionStore =
       DurableLocalSessionStore.fromPersistenceComponents(
         legacySnapshotStore: effectiveSnapshotStore,
         durableStorage: durableStorage,
       );
-  final HostService effectiveHostService;
-  final CommonCodeSessionBootstrapPort? effectiveBootstrapPort;
-  final void Function(Session session)? effectivePersistSessionMutation;
-  if (hostService case final HostService providedHostService) {
-    effectiveHostService = providedHostService;
-    effectiveBootstrapPort = bootstrapPort as CommonCodeSessionBootstrapPort?;
-    effectivePersistSessionMutation =
-        persistSessionMutation as void Function(Session session)?;
-  } else {
-    final hostAdapter = InMemoryHostAdapter();
-    final bootstrapPort = CommonCodeSessionBootstrapPortAdapter(
-      sessionStore: effectiveSessionStore,
-      host: CommonCodeSessionBootstrapHost(
-        restoreSession: hostAdapter.restoreSession,
-        createSession: hostAdapter.createSession,
-        attachClient: hostAdapter.attachClient,
-      ),
-      diagnosticsPort: diagnosticsPort,
-    );
-    effectiveHostService = hostAdapter as HostService;
-    effectiveBootstrapPort = bootstrapPort;
-    effectivePersistSessionMutation = _createPersistSessionMutation(
-      sessionStore: effectiveSessionStore,
-      attachedClientId: attachedClientId,
-      diagnosticsPort: diagnosticsPort,
-    );
-  }
-
-  final CommonCodeSessionDriver effectiveDriver =
-      driver ??
-      HostCoreDesktopSessionDriver(
-        hostService: effectiveHostService,
-        bootstrapPort: effectiveBootstrapPort,
-        persistSessionMutation: effectivePersistSessionMutation,
+  final effectiveHostService =
+      (hostService as HostService?) ?? (InMemoryHostAdapter() as HostService);
+  final effectiveBootstrapPort =
+      (bootstrapPort as CommonCodeSessionBootstrapPort?) ??
+      CommonCodeSessionBootstrapPortAdapter(
         sessionStore: effectiveSessionStore,
-        defaultSessionId: defaultSessionId,
-        hostId: hostId,
-        attachedClientId: attachedClientId,
+        host: CommonCodeSessionBootstrapHost(
+          restoreSession: effectiveHostService.restoreSession,
+          createSession: effectiveHostService.createSession,
+          attachClient: effectiveHostService.attachClient,
+        ),
+        diagnosticsPort: diagnosticsPort,
       );
-  final HostCoreDesktopSessionDriver? hostCoreDriver =
-      switch (effectiveDriver) {
-        HostCoreDesktopSessionDriver driver => driver,
-        _ => null,
-      };
-  final effectiveGateway =
-      hostGateway ??
-      (hostCoreDriver == null
-          ? (throw ArgumentError.value(
-              driver,
-              'driver',
-              'hostGateway is required when driver is not a '
-                  'HostCoreDesktopSessionDriver.',
-            ))
-          : _HostCoreDesktopHostGateway(
-              serviceProvider: () => hostCoreDriver.sharedService,
-              persistSessionMutation: () =>
-                  hostCoreDriver.persistSessionMutation,
-            ));
+  final effectivePersistSessionMutation =
+      (persistSessionMutation as void Function(Session session)?) ??
+      effectiveSessionStore.createPersistenceContinuation(
+        attachedClientId: attachedClientId,
+        onError: createDurableWriteFailureReporter(diagnosticsPort),
+      );
+
+  final CommonCodeSessionDriver effectiveDriver;
+  final CommonCodeSessionObservation effectiveObservation;
+  final HostGateway effectiveGateway;
+
+  if (driver != null) {
+    effectiveDriver = driver;
+    effectiveObservation =
+        observation ??
+        switch (driver) {
+          CommonCodeSessionObservation observation => observation,
+          _ => throw ArgumentError.value(
+            driver,
+            'driver',
+            'observation is required when driver does not implement '
+                'CommonCodeSessionObservation.',
+          ),
+        };
+    effectiveGateway =
+        hostGateway ??
+        (throw ArgumentError.value(
+          driver,
+          'driver',
+          'hostGateway is required when providing a custom driver.',
+        ));
+  } else {
+    effectiveObservation =
+        observation ?? _DesktopSessionObservation(effectiveHostService);
+    effectiveDriver = _DesktopSessionDriver(
+      hostService: effectiveHostService,
+      bootstrapPort: effectiveBootstrapPort,
+      observation: effectiveObservation,
+      persistSessionMutation: effectivePersistSessionMutation,
+      defaultSessionId: defaultSessionId,
+      hostId: hostId,
+      attachedClientId: attachedClientId,
+    );
+    effectiveGateway =
+        hostGateway ??
+        _DesktopSessionHostGateway(
+          hostService: effectiveHostService,
+          persistSessionMutation: effectivePersistSessionMutation,
+        );
+  }
 
   return CommonCodeSessionFacade(
     driver: effectiveDriver,
-    observation: observation ?? effectiveDriver as CommonCodeSessionObservation,
+    observation: effectiveObservation,
     hostGateway: effectiveGateway,
     attachedClientId: attachedClientId,
   );
@@ -119,108 +122,87 @@ HostDesktopSessionRuntime createDesktopSessionRuntime({
   final diagnosticsPort = resolveDurableLocalHostDiagnosticsPort(
     diagnosticsSink,
   );
-
-  if (hostService != null) {
-    return HostDesktopSessionRuntime(
-      hostService: hostService,
-      bootstrapPort: bootstrapPort,
-      snapshotStore: effectiveSnapshotStore,
-      persistSessionMutation: persistSessionMutation,
-      defaultSessionId: defaultSessionId,
-      hostId: hostId,
-      attachedClientId: attachedClientId,
-    );
-  }
-
-  final hostAdapter = InMemoryHostAdapter();
+  final effectiveHostService =
+      hostService ?? (InMemoryHostAdapter() as HostService);
   final sessionStore = DurableLocalSessionStore.fromPersistenceComponents(
     legacySnapshotStore: effectiveSnapshotStore,
     durableStorage: durableStorage,
   );
-  final bootstrapPort = CommonCodeSessionBootstrapPortAdapter(
-    sessionStore: sessionStore,
-    host: CommonCodeSessionBootstrapHost(
-      restoreSession: hostAdapter.restoreSession,
-      createSession: hostAdapter.createSession,
-      attachClient: hostAdapter.attachClient,
-    ),
-    diagnosticsPort: diagnosticsPort,
-  );
+  final effectiveBootstrapPort =
+      bootstrapPort ??
+      CommonCodeSessionBootstrapPortAdapter(
+        sessionStore: sessionStore,
+        host: CommonCodeSessionBootstrapHost(
+          restoreSession: effectiveHostService.restoreSession,
+          createSession: effectiveHostService.createSession,
+          attachClient: effectiveHostService.attachClient,
+        ),
+        diagnosticsPort: diagnosticsPort,
+      );
+  final effectivePersistSessionMutation =
+      persistSessionMutation ??
+      sessionStore.createPersistenceContinuation(
+        attachedClientId: attachedClientId,
+        onError: createDurableWriteFailureReporter(diagnosticsPort),
+      );
+
   return HostDesktopSessionRuntime(
-    hostService: hostAdapter as HostService,
-    bootstrapPort: bootstrapPort,
+    hostService: effectiveHostService,
+    bootstrapPort: effectiveBootstrapPort,
     snapshotStore: effectiveSnapshotStore,
-    persistSessionMutation: _createPersistSessionMutation(
-      sessionStore: sessionStore,
-      attachedClientId: attachedClientId,
-      diagnosticsPort: diagnosticsPort,
-    ),
+    persistSessionMutation: effectivePersistSessionMutation,
     defaultSessionId: defaultSessionId,
     hostId: hostId,
     attachedClientId: attachedClientId,
   );
 }
 
-void Function(Session session) _createPersistSessionMutation({
-  required CommonCodeSessionStore sessionStore,
-  required String attachedClientId,
-  required DurableLocalHostDiagnosticsPort? diagnosticsPort,
-}) {
-  return (Session session) {
-    unawaited(
-      sessionStore
-          .queueSessionPersistence(session, attachedClientId: attachedClientId)
-          .catchError((Object error, StackTrace stackTrace) {
-            diagnosticsPort?.emit(
-              DurableLocalHostDiagnostic(
-                DurableLocalHostDiagnosticCode.durableWriteFailed,
-                error: error,
-                stackTrace: stackTrace,
-              ),
-            );
-          }),
-    );
-  };
-}
-
-final class HostCoreDesktopSessionDriver
-    implements CommonCodeSessionDriver, CommonCodeSessionObservation {
-  HostCoreDesktopSessionDriver({
-    HostService? hostService,
-    CommonCodeSessionBootstrapPort? bootstrapPort,
-    void Function(Session session)? persistSessionMutation,
-    CommonCodeSessionStore? sessionStore,
-    String defaultSessionId = desktopSessionRuntimeDefaultSessionId,
-    String hostId = desktopSessionRuntimeHostId,
-    String attachedClientId = desktopSessionRuntimeAttachedClientId,
+final class _DesktopSessionDriver implements CommonCodeSessionDriver {
+  _DesktopSessionDriver({
+    required HostService hostService,
+    required CommonCodeSessionBootstrapPort bootstrapPort,
+    required CommonCodeSessionObservation observation,
+    required void Function(Session session)? persistSessionMutation,
+    required String defaultSessionId,
+    required String hostId,
+    required String attachedClientId,
   }) : _hostService = hostService,
        _bootstrapPort = bootstrapPort,
+       _observation = observation,
        _persistSessionMutation = persistSessionMutation,
-       _sessionStore = sessionStore ?? DurableLocalSessionStore(),
        _defaultSessionId = defaultSessionId,
        _hostId = hostId,
        _attachedClientId = attachedClientId;
 
-  final HostService? _hostService;
-  final CommonCodeSessionBootstrapPort? _bootstrapPort;
+  final HostService _hostService;
+  final CommonCodeSessionBootstrapPort _bootstrapPort;
+  final CommonCodeSessionObservation _observation;
   final void Function(Session session)? _persistSessionMutation;
-  final CommonCodeSessionStore _sessionStore;
   final String _defaultSessionId;
   final String _hostId;
   final String _attachedClientId;
 
-  HostService? _service;
-  CommonCodeSessionBootstrapPort? _resolvedBootstrapPort;
-  void Function(Session session)? _resolvedPersistSessionMutation;
-  bool _isBootstrapped = false;
   String? _currentSessionId;
   final CommonCodeSessionBootstrapLifecycle _bootstrapLifecycle =
       CommonCodeSessionBootstrapLifecycle();
 
   @override
   Future<CommonCodeSessionBinding> ensureSession() async {
-    await _bootstrapIfNeeded();
-    return CommonCodeSessionBinding.attached(sessionId: _currentSessionId!);
+    final currentSessionId = _currentSessionId;
+    if (currentSessionId != null) {
+      return CommonCodeSessionBinding.attached(sessionId: currentSessionId);
+    }
+
+    final bootstrappedSession = await _bootstrapLifecycle.bootstrap(
+      request: CommonCodeSessionBootstrapRequest(
+        defaultSessionId: _defaultSessionId,
+        hostId: _hostId,
+        attachedClientId: _attachedClientId,
+      ),
+      port: _bootstrapPort,
+    );
+    _currentSessionId = bootstrappedSession.id;
+    return CommonCodeSessionBinding.attached(sessionId: bootstrappedSession.id);
   }
 
   @override
@@ -228,14 +210,12 @@ final class HostCoreDesktopSessionDriver
     required String sessionId,
     required String notificationId,
   }) async {
-    final service = _resolveService();
-    await _bootstrapIfNeeded();
-
-    final session = service.acknowledgeNotification(
+    await ensureSession();
+    final session = _hostService.acknowledgeNotification(
       sessionId: sessionId,
       notificationId: notificationId,
     );
-    persistSessionMutation?.call(session);
+    _persistSessionMutation?.call(session);
   }
 
   @override
@@ -244,115 +224,40 @@ final class HostCoreDesktopSessionDriver
     required String attachedClientId,
     required String submittedText,
   }) async {
-    final service = _resolveService();
-    await _bootstrapIfNeeded();
-
-    final session = service.submitTurn(
+    final session = _hostService.submitTurn(
       sessionId: sessionId,
       client: Client(id: attachedClientId),
       submittedText: submittedText,
     );
-    persistSessionMutation?.call(session);
+    _persistSessionMutation?.call(session);
   }
 
   @override
   Stream<Session> watchSession(String sessionId) {
-    final service = _resolveService();
-    return service.watchSession(sessionId);
-  }
-
-  HostService get sharedService => _resolveService();
-
-  void Function(Session session)? get persistSessionMutation {
-    _resolveService();
-    return _resolvedPersistSessionMutation;
-  }
-
-  Future<void> _bootstrapIfNeeded() async {
-    final service = _resolveService();
-    if (_isBootstrapped) {
-      return;
-    }
-
-    final CommonCodeSessionBootstrapPort? bootstrapPort =
-        _resolvedBootstrapPort ??
-        (service is CommonCodeSessionBootstrapPort
-            ? service as CommonCodeSessionBootstrapPort
-            : null);
-    if (bootstrapPort != null) {
-      final bootstrappedSession = await _bootstrapLifecycle.bootstrap(
-        request: CommonCodeSessionBootstrapRequest(
-          defaultSessionId: _defaultSessionId,
-          hostId: _hostId,
-          attachedClientId: _attachedClientId,
-        ),
-        port: bootstrapPort,
-      );
-      _currentSessionId = bootstrappedSession.id;
-      _isBootstrapped = true;
-      return;
-    }
-
-    final legacySeed = await _sessionStore.loadLegacySeedSession(
-      attachedClientId: _attachedClientId,
-    );
-    final restoredSession = legacySeed.session;
-    if (restoredSession != null) {
-      try {
-        // ignore: deprecated_member_use
-        final session = service.restoreSession(restoredSession);
-        persistSessionMutation?.call(session);
-        _currentSessionId = restoredSession.id;
-        _isBootstrapped = true;
-        return;
-      } catch (_) {
-        // Fall back to the fresh desktop bootstrap path.
-      }
-    }
-
-    // ignore: deprecated_member_use
-    service.createSession(
-      sessionId: _defaultSessionId,
-      activeHost: Host(id: _hostId),
-    );
-    // ignore: deprecated_member_use
-    final attachedSession = service.attachClient(
-      sessionId: _defaultSessionId,
-      client: Client(id: _attachedClientId),
-    );
-    persistSessionMutation?.call(attachedSession);
-    _currentSessionId = _defaultSessionId;
-    _isBootstrapped = true;
-  }
-
-  HostService _resolveService() {
-    final existingService = _service;
-    if (existingService != null) {
-      return existingService;
-    }
-
-    final injectedService = _hostService;
-    if (injectedService != null) {
-      _resolvedBootstrapPort = _bootstrapPort;
-      _resolvedPersistSessionMutation = _persistSessionMutation;
-      return _service = injectedService;
-    }
-
-    throw StateError(
-      'HostCoreDesktopSessionDriver requires an injected HostService.',
-    );
+    return _observation.watchSession(sessionId);
   }
 }
 
-final class _HostCoreDesktopHostGateway implements HostGateway {
-  _HostCoreDesktopHostGateway({
-    required HostService Function() serviceProvider,
-    required void Function(Session session)? Function() persistSessionMutation,
-  }) : _serviceProvider = serviceProvider,
+final class _DesktopSessionObservation implements CommonCodeSessionObservation {
+  const _DesktopSessionObservation(this._hostService);
+
+  final HostService _hostService;
+
+  @override
+  Stream<Session> watchSession(String sessionId) {
+    return _hostService.watchSession(sessionId);
+  }
+}
+
+final class _DesktopSessionHostGateway implements HostGateway {
+  const _DesktopSessionHostGateway({
+    required HostService hostService,
+    required void Function(Session session)? persistSessionMutation,
+  }) : _hostService = hostService,
        _persistSessionMutation = persistSessionMutation;
 
-  final HostService Function() _serviceProvider;
-  final void Function(Session session)? Function() _persistSessionMutation;
+  final HostService _hostService;
+  final void Function(Session session)? _persistSessionMutation;
 
   @override
   Future<void> submitTurn({
@@ -360,13 +265,11 @@ final class _HostCoreDesktopHostGateway implements HostGateway {
     required Client client,
     required String submittedText,
   }) async {
-    final service = _serviceProvider();
-
-    final session = service.submitTurn(
+    final session = _hostService.submitTurn(
       sessionId: sessionId,
       client: client,
       submittedText: submittedText,
     );
-    _persistSessionMutation()?.call(session);
+    _persistSessionMutation?.call(session);
   }
 }

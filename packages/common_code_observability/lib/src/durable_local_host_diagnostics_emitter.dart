@@ -12,6 +12,25 @@ final class DurableLocalHostDiagnosticsEmitter
   }
 }
 
+void Function(Object error, StackTrace stackTrace)?
+createDurableWriteFailureReporter(
+  DurableLocalHostDiagnosticsPort? diagnosticsPort,
+) {
+  if (diagnosticsPort == null) {
+    return null;
+  }
+
+  return (Object error, StackTrace stackTrace) {
+    diagnosticsPort.emit(
+      DurableLocalHostDiagnostic(
+        DurableLocalHostDiagnosticCode.durableWriteFailed,
+        error: error,
+        stackTrace: stackTrace,
+      ),
+    );
+  };
+}
+
 DurableLocalHostDiagnosticsPort? resolveDurableLocalHostDiagnosticsPort(
   Object? candidate,
 ) {

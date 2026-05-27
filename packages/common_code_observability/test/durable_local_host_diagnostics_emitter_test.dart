@@ -49,4 +49,25 @@ void main() {
       );
     });
   });
+
+  group('createDurableWriteFailureReporter', () {
+    test('emits durable write failed diagnostics through port', () {
+      final emitted = <DurableLocalHostDiagnostic>[];
+      final reporter = createDurableWriteFailureReporter(
+        DurableLocalHostDiagnosticsEmitter(emitted.add),
+      );
+      final error = StateError('write boom');
+      final stackTrace = StackTrace.current;
+
+      reporter!(error, stackTrace);
+
+      expect(emitted, hasLength(1));
+      expect(
+        emitted.single.code,
+        DurableLocalHostDiagnosticCode.durableWriteFailed,
+      );
+      expect(emitted.single.error, same(error));
+      expect(emitted.single.stackTrace, same(stackTrace));
+    });
+  });
 }

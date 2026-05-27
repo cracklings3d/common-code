@@ -95,10 +95,17 @@ final class DurableLocalSessionStore implements CommonCodeSessionStore {
   }
 
   @override
-  Future<void> persistSession(Session session, {String? attachedClientId}) async {
-    await _durableStorage.writeSessionPayload(jsonEncode(_codec.encode(session)));
+  Future<void> persistSession(
+    Session session, {
+    String? attachedClientId,
+  }) async {
+    await _durableStorage.writeSessionPayload(
+      jsonEncode(_codec.encode(session)),
+    );
     if (attachedClientId != null) {
-      await _durableStorage.disableLegacySeed(desktopClientId: attachedClientId);
+      await _durableStorage.disableLegacySeed(
+        desktopClientId: attachedClientId,
+      );
     }
   }
 
@@ -107,10 +114,41 @@ final class DurableLocalSessionStore implements CommonCodeSessionStore {
     Session session, {
     String? attachedClientId,
   }) {
+    return _enqueuePersistence(
+      session,
+      attachedClientId: attachedClientId,
+    );
+  }
+
+  void Function(Session session) createPersistenceContinuation({
+    required String attachedClientId,
+    void Function(Object error, StackTrace stackTrace)? onError,
+  }) {
+    return (Session session) {
+      unawaited(
+        _enqueuePersistence(
+          session,
+          attachedClientId: attachedClientId,
+          onError: onError,
+        ),
+      );
+    };
+  }
+
+  Future<void> _enqueuePersistence(
+    Session session, {
+    String? attachedClientId,
+    void Function(Object error, StackTrace stackTrace)? onError,
+  }) {
     final pendingWrite = _writeSequence.then(
       (_) => persistSession(session, attachedClientId: attachedClientId),
     );
-    _writeSequence = pendingWrite.catchError((_) {});
+    _writeSequence = pendingWrite.then<void>(
+      (_) {},
+      onError: (Object error, StackTrace stackTrace) {
+        onError?.call(error, stackTrace);
+      },
+    );
     return pendingWrite;
   }
 
