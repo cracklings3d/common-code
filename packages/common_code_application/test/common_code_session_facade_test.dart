@@ -190,7 +190,8 @@ void main() {
             ),
             isBootstrapped: port.isBootstrapped,
             readBootstrappedSession: port.readBootstrappedSession,
-            loadDurableSessionCandidate: port.sessionStore.loadDurableSessionCandidate,
+            loadDurableSessionCandidate:
+                port.sessionStore.loadDurableSessionCandidate,
             restoreDurableSession: port.restoreDurableSession,
             loadLegacySeedSession: port.sessionStore.loadLegacySeedSession,
             restoreLegacySeededSession: port.restoreLegacySeededSession,
@@ -222,7 +223,8 @@ void main() {
               ),
               isBootstrapped: port.isBootstrapped,
               readBootstrappedSession: port.readBootstrappedSession,
-              loadDurableSessionCandidate: port.sessionStore.loadDurableSessionCandidate,
+              loadDurableSessionCandidate:
+                  port.sessionStore.loadDurableSessionCandidate,
               restoreDurableSession: port.restoreDurableSession,
               loadLegacySeedSession: port.sessionStore.loadLegacySeedSession,
               restoreLegacySeededSession: port.restoreLegacySeededSession,
@@ -257,7 +259,8 @@ void main() {
               ),
               isBootstrapped: port.isBootstrapped,
               readBootstrappedSession: port.readBootstrappedSession,
-              loadDurableSessionCandidate: port.sessionStore.loadDurableSessionCandidate,
+              loadDurableSessionCandidate:
+                  port.sessionStore.loadDurableSessionCandidate,
               restoreDurableSession: port.restoreDurableSession,
               loadLegacySeedSession: port.sessionStore.loadLegacySeedSession,
               restoreLegacySeededSession: port.restoreLegacySeededSession,
@@ -291,7 +294,8 @@ void main() {
             ),
             isBootstrapped: port.isBootstrapped,
             readBootstrappedSession: port.readBootstrappedSession,
-            loadDurableSessionCandidate: port.sessionStore.loadDurableSessionCandidate,
+            loadDurableSessionCandidate:
+                port.sessionStore.loadDurableSessionCandidate,
             restoreDurableSession: port.restoreDurableSession,
             loadLegacySeedSession: port.sessionStore.loadLegacySeedSession,
             restoreLegacySeededSession: port.restoreLegacySeededSession,
@@ -325,7 +329,8 @@ void main() {
               ),
               isBootstrapped: port.isBootstrapped,
               readBootstrappedSession: port.readBootstrappedSession,
-              loadDurableSessionCandidate: port.sessionStore.loadDurableSessionCandidate,
+              loadDurableSessionCandidate:
+                  port.sessionStore.loadDurableSessionCandidate,
               restoreDurableSession: port.restoreDurableSession,
               loadLegacySeedSession: port.sessionStore.loadLegacySeedSession,
               restoreLegacySeededSession: port.restoreLegacySeededSession,
@@ -585,6 +590,24 @@ final class _FakeBootstrapPort implements CommonCodeSessionBootstrapPort {
   CommonCodeSessionStore get sessionStore => _FakeSessionStore(this);
 
   @override
+  Future<CommonCodeDurableBootstrapLoadResult> loadDurableSessionCandidate({
+    required String attachedClientId,
+  }) {
+    return sessionStore.loadDurableSessionCandidate(
+      attachedClientId: attachedClientId,
+    );
+  }
+
+  @override
+  Future<CommonCodeLegacySeedLoadResult> loadLegacySeedSession({
+    required String attachedClientId,
+  }) {
+    return sessionStore.loadLegacySeedSession(
+      attachedClientId: attachedClientId,
+    );
+  }
+
+  @override
   Future<Session> createFreshSession(
     CommonCodeSessionBootstrapRequest request,
   ) async {
@@ -638,7 +661,10 @@ final class _FakeSessionStore implements CommonCodeSessionStore {
   }
 
   @override
-  Future<void> persistSession(Session session, {String? attachedClientId}) async {}
+  Future<void> persistSession(
+    Session session, {
+    String? attachedClientId,
+  }) async {}
 
   @override
   Future<void> queueSessionPersistence(

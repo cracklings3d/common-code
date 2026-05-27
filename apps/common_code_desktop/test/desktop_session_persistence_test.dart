@@ -1,7 +1,7 @@
 import 'dart:convert';
 
+import 'package:common_code_application/common_code_application.dart';
 import 'package:common_code_desktop/src/desktop_session_runtime.dart';
-import 'package:common_code_desktop/src/durable_local_host_service.dart';
 import 'package:common_code_domain/common_code_domain.dart';
 import 'package:common_code_observability/common_code_observability.dart';
 import 'package:common_code_persistence/common_code_persistence.dart';
@@ -97,7 +97,7 @@ void main() {
       );
 
       await runtime.initialize();
-      await _lastCreatedDurableService!.flushPendingWrites();
+      await _lastCreatedSessionStore!.waitForPendingPersistence();
 
       expectSessionLike(snapshot!, _completedSessionWithNotifications());
       expect(storage.payload, isNotNull);
@@ -260,8 +260,11 @@ void main() {
         sessionId: firstSnapshot!.id,
         notificationId: acknowledgedNotificationId,
       );
-      _lastCreatedDurableService!.queueSessionPersistence(acknowledgedSession);
-      await _lastCreatedDurableService!.flushPendingWrites();
+      _createPersistSessionMutation(
+        _lastCreatedSessionStore!,
+        attachedClientId: desktopSessionRuntimeAttachedClientId,
+      )(acknowledgedSession);
+      await _lastCreatedSessionStore!.waitForPendingPersistence();
 
       final restartedRuntime = _createDurableRuntime(
         durableStorage: storage,
@@ -293,7 +296,7 @@ void main() {
   });
 }
 
-DurableLocalHostService? _lastCreatedDurableService;
+CommonCodeSessionStore? _lastCreatedSessionStore;
 HostService? _lastCreatedHostService;
 
 HostService _createDurableHostAdapter({
@@ -303,17 +306,25 @@ HostService _createDurableHostAdapter({
 }) {
   final hostAdapter = InMemoryHostAdapter();
   final hostService = hostAdapter as HostService;
-  final durableService = DurableLocalHostService.withAdapter(
-    hostAdapter: hostAdapter,
-    sessionStore: DurableLocalSessionStore.fromPersistenceComponents(
-      legacySnapshotStore: snapshotStore,
-      durableStorage: durableStorage,
+  final sessionStore = DurableLocalSessionStore.fromPersistenceComponents(
+    legacySnapshotStore: snapshotStore,
+    durableStorage: durableStorage,
+  );
+  _lastCreatedSessionStore = sessionStore;
+  final bootstrapPort = CommonCodeSessionBootstrapPortAdapter(
+    sessionStore: sessionStore,
+    host: CommonCodeSessionBootstrapHost(
+      restoreSession: hostAdapter.restoreSession,
+      createSession: hostAdapter.createSession,
+      attachClient: hostAdapter.attachClient,
     ),
     diagnosticsPort: diagnosticsPort,
   );
-  _lastCreatedDurableService = durableService;
   _lastCreatedHostService = hostService;
-  return hostService;
+  return _BootstrappedHostService(
+    hostService: hostService,
+    bootstrapPort: bootstrapPort,
+  );
 }
 
 HostDesktopSessionRuntime _createDurableRuntime({
@@ -328,10 +339,86 @@ HostDesktopSessionRuntime _createDurableRuntime({
   );
   return HostDesktopSessionRuntime(
     hostService: hostService,
-    bootstrapPort: _lastCreatedDurableService,
+    bootstrapPort: (hostService as _BootstrappedHostService).bootstrapPort,
     snapshotStore: snapshotStore,
-    persistSessionMutation: _lastCreatedDurableService!.queueSessionPersistence,
+    persistSessionMutation: _createPersistSessionMutation(
+      _lastCreatedSessionStore!,
+      attachedClientId: desktopSessionRuntimeAttachedClientId,
+      diagnosticsPort: diagnosticsPort,
+    ),
   );
+}
+
+void Function(Session session) _createPersistSessionMutation(
+  CommonCodeSessionStore sessionStore, {
+  required String attachedClientId,
+  DurableLocalHostDiagnosticsPort? diagnosticsPort,
+}) {
+  return (Session session) {
+    sessionStore
+        .queueSessionPersistence(session, attachedClientId: attachedClientId)
+        .catchError((Object error, StackTrace stackTrace) {
+          diagnosticsPort?.emit(
+            DurableLocalHostDiagnostic(
+              DurableLocalHostDiagnosticCode.durableWriteFailed,
+              error: error,
+              stackTrace: stackTrace,
+            ),
+          );
+        });
+  };
+}
+
+final class _BootstrappedHostService implements HostService {
+  const _BootstrappedHostService({
+    required HostService hostService,
+    required this.bootstrapPort,
+  }) : _hostService = hostService;
+
+  final HostService _hostService;
+  final CommonCodeSessionBootstrapPort bootstrapPort;
+
+  @override
+  Session acknowledgeNotification({
+    required String sessionId,
+    required String notificationId,
+  }) => _hostService.acknowledgeNotification(
+    sessionId: sessionId,
+    notificationId: notificationId,
+  );
+
+  @override
+  Session attachClient({required String sessionId, required Client client}) =>
+      _hostService.attachClient(sessionId: sessionId, client: client);
+
+  @override
+  Session createSession({
+    required String sessionId,
+    required Host activeHost,
+  }) =>
+      _hostService.createSession(sessionId: sessionId, activeHost: activeHost);
+
+  @override
+  Session readSession(String sessionId) => _hostService.readSession(sessionId);
+
+  @override
+  Session restoreSession(Session session) =>
+      _hostService.restoreSession(session);
+
+  @override
+  Session submitTurn({
+    required String sessionId,
+    required Client client,
+    required String submittedText,
+  }) => _hostService.submitTurn(
+    sessionId: sessionId,
+    client: client,
+    submittedText: submittedText,
+  );
+
+  @override
+  Stream<Session> watchSession(String sessionId) =>
+      _hostService.watchSession(sessionId);
 }
 
 void expectSessionLike(Session actual, Session expected) {

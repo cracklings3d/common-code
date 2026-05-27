@@ -3,11 +3,11 @@ import 'dart:convert';
 
 import 'package:common_code_application/common_code_application.dart';
 import 'package:common_code_desktop/main.dart';
+import 'package:common_code_desktop/src/desktop_session_app_edge_composition.dart';
 import 'package:common_code_desktop/src/desktop_session_controller.dart';
 import 'package:common_code_desktop/src/desktop_session_runtime.dart';
 import 'package:common_code_desktop/src/desktop_session_snapshot_codec.dart';
 import 'package:common_code_desktop/src/desktop_session_snapshot_store.dart';
-import 'package:common_code_desktop/src/durable_local_host_service.dart';
 import 'package:common_code_domain/common_code_domain.dart';
 import 'package:flutter/material.dart'
     show FilledButton, SizedBox, SnackBar, TextField;
@@ -477,12 +477,11 @@ void main() {
         of: find.byType(SnackBar),
         matching: find.text('Turn running: Stored submitted turn'),
       );
-      final hostService = DurableLocalHostService(
-        durableStorage: SharedPreferencesDurableLocalHostStorage(),
-        legacySnapshotStore: SharedPreferencesDesktopSessionSnapshotStore(),
-      );
       final controller = DesktopSessionController(
-        runtime: HostDesktopSessionRuntime(hostService: hostService),
+        runtime: createDesktopSessionRuntime(
+          durableStorage: SharedPreferencesDurableLocalHostStorage(),
+          snapshotStore: SharedPreferencesDesktopSessionSnapshotStore(),
+        ),
       );
 
       await tester.pumpWidget(
@@ -506,21 +505,15 @@ void main() {
             .isAcknowledged,
         isTrue,
       );
-      expect(
-        hostService
-            .readSession(controller.state.snapshot!.session.id)
-            .notifications
-            .firstWhere((notification) => notification.id == notificationId)
-            .isAcknowledged,
-        isTrue,
-      );
-
       await tester.pumpWidget(const SizedBox.shrink());
       await tester.pumpAndSettle();
       controller.dispose();
 
       final reconnectedController = DesktopSessionController(
-        runtime: HostDesktopSessionRuntime(hostService: hostService),
+        runtime: createDesktopSessionRuntime(
+          durableStorage: SharedPreferencesDurableLocalHostStorage(),
+          snapshotStore: SharedPreferencesDesktopSessionSnapshotStore(),
+        ),
       );
 
       await tester.pumpWidget(
