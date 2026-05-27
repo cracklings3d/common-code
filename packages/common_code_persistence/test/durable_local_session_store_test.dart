@@ -59,12 +59,42 @@ void main() {
       );
 
       final waitFuture = store.waitForPendingPersistence();
-      expect(waitFuture, doesNotComplete);
+      await Future<void>.delayed(Duration.zero);
+      expect(durableStorage.disableLegacySeedCalls, 0);
 
       pendingWrite.complete();
       await waitFuture;
       expect(durableStorage.disableLegacySeedCalls, 1);
     });
+
+    test(
+      'createPersistenceContinuation delegates queued writes and reports failures',
+      () async {
+        final writeError = StateError('write boom');
+        Object? capturedError;
+        StackTrace? capturedStackTrace;
+        final store = DurableLocalSessionStore(
+          durableStorage: _FakeDurableSessionStore(
+            onWrite: (_) => Future<void>.error(writeError),
+          ),
+          legacySnapshotStore: _FakeSessionSnapshotStore(),
+        );
+
+        store.createPersistenceContinuation(
+          attachedClientId: 'desktop-client',
+          onError: (error, stackTrace) {
+            capturedError = error;
+            capturedStackTrace = stackTrace;
+          },
+        )(_session());
+
+        await store.waitForPendingPersistence();
+        await Future<void>.delayed(Duration.zero);
+
+        expect(capturedError, same(writeError));
+        expect(capturedStackTrace, isNotNull);
+      },
+    );
   });
 }
 
