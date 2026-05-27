@@ -6,9 +6,8 @@ import 'package:common_code_desktop/main.dart';
 import 'package:common_code_desktop/src/desktop_session_app_edge_composition.dart';
 import 'package:common_code_desktop/src/desktop_session_controller.dart';
 import 'package:common_code_desktop/src/desktop_session_runtime.dart';
-import 'package:common_code_desktop/src/desktop_session_snapshot_codec.dart';
-import 'package:common_code_desktop/src/desktop_session_snapshot_store.dart';
 import 'package:common_code_domain/common_code_domain.dart';
+import 'package:common_code_persistence/common_code_persistence.dart';
 import 'package:flutter/material.dart'
     show FilledButton, SizedBox, SnackBar, TextField;
 import 'package:flutter_test/flutter_test.dart';
@@ -990,22 +989,16 @@ final class _AcknowledgeFailingRuntime implements DesktopSessionRuntime {
   _AcknowledgeFailingRuntime({required Session session}) : _session = session;
 
   final Session _session;
-  final StreamController<CommonCodeSessionFacadeState> _states =
-      StreamController<CommonCodeSessionFacadeState>.broadcast(sync: true);
-  CommonCodeSessionFacadeState _state =
-      const CommonCodeSessionFacadeState.loading();
 
   @override
   void bind({
     required void Function(Session session) onSnapshot,
     required void Function(Object error, StackTrace stackTrace) onWatchError,
-  }) {}
+  }) {
+    _onSnapshot = onSnapshot;
+  }
 
-  @override
-  Stream<CommonCodeSessionFacadeState> get states => _states.stream;
-
-  @override
-  CommonCodeSessionFacadeState get state => _state;
+  void Function(Session session)? _onSnapshot;
 
   @override
   Future<void> initialize() async {
@@ -1026,21 +1019,9 @@ final class _AcknowledgeFailingRuntime implements DesktopSessionRuntime {
   Future<void> submitTurn({required String submittedText}) async {}
 
   @override
-  Future<void> dispose() async {
-    await _states.close();
-  }
+  Future<void> dispose() async {}
 
   void _emitSession() {
-    if (_states.isClosed) {
-      return;
-    }
-
-    _state = CommonCodeSessionFacadeState.data(
-      CommonCodeSessionSnapshot(
-        session: _session,
-        attachedClientId: DesktopSessionController.attachedClientId,
-      ),
-    );
-    _states.add(_state);
+    _onSnapshot?.call(_session);
   }
 }
