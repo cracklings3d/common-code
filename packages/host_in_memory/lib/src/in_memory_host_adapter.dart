@@ -1,7 +1,9 @@
 import 'dart:async';
 
 import 'package:common_code_domain/common_code_domain.dart';
-import 'package:common_code_application/common_code_application.dart';
+import 'package:host_core/host_core.dart';
+
+import 'in_memory_host_service.dart';
 
 /// In-memory host adapter that owns session storage, turn simulation,
 /// and session observation lifecycle.
@@ -188,8 +190,8 @@ class InMemoryHostAdapter implements HostService {
             SimulatedTurnTerminalOutcome.completed =>
               session.completeActiveTurn(),
             SimulatedTurnTerminalOutcome.failed => session.failActiveTurn(
-              failureSummary: _simulationPolicy.failureSummary,
-            ),
+                failureSummary: _simulationPolicy.failureSummary,
+              ),
           },
         );
       });
