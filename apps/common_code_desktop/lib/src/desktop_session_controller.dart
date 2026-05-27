@@ -27,36 +27,42 @@ final class DesktopSessionControllerState {
     required this.status,
     this.snapshot,
     this.message,
+    this.acknowledgementErrorMessage,
     required this.isSubmitting,
   });
 
   const DesktopSessionControllerState.loading({bool isSubmitting = false})
     : this._(
         status: DesktopSessionControllerStatus.loading,
+        acknowledgementErrorMessage: null,
         isSubmitting: isSubmitting,
       );
 
   const DesktopSessionControllerState.empty({bool isSubmitting = false})
     : this._(
         status: DesktopSessionControllerStatus.empty,
+        acknowledgementErrorMessage: null,
         isSubmitting: isSubmitting,
       );
 
   const DesktopSessionControllerState.data(
     DesktopSessionSnapshot this.snapshot, {
     this.isSubmitting = false,
+    this.acknowledgementErrorMessage,
   }) : status = DesktopSessionControllerStatus.data,
        message = null;
 
   const DesktopSessionControllerState.error(
     String this.message, {
     this.isSubmitting = false,
+    this.acknowledgementErrorMessage,
   }) : status = DesktopSessionControllerStatus.error,
        snapshot = null;
 
   final DesktopSessionControllerStatus status;
   final DesktopSessionSnapshot? snapshot;
   final String? message;
+  final String? acknowledgementErrorMessage;
   final bool isSubmitting;
 
   DesktopSessionControllerState copyWithSubmitting(bool isSubmitting) {
@@ -68,6 +74,7 @@ final class DesktopSessionControllerState {
       DesktopSessionControllerStatus.data => DesktopSessionControllerState.data(
         snapshot!,
         isSubmitting: isSubmitting,
+        acknowledgementErrorMessage: acknowledgementErrorMessage,
       ),
       DesktopSessionControllerStatus.error =>
         DesktopSessionControllerState.error(
@@ -106,8 +113,10 @@ class DesktopSessionController extends ChangeNotifier {
   DesktopSessionControllerState _state =
       const DesktopSessionControllerState.loading();
   bool _isDisposed = false;
+  bool _isAcknowledgingNotification = false;
 
   DesktopSessionControllerState get state => _state;
+  bool get isAcknowledgingNotification => _isAcknowledgingNotification;
 
   Future<void> initialize() async {
     _emitState(const DesktopSessionControllerState.loading());
@@ -117,6 +126,44 @@ class DesktopSessionController extends ChangeNotifier {
   Future<void> refresh() async {
     _emitState(const DesktopSessionControllerState.loading());
     await _runtime.refresh();
+  }
+
+  Future<void> acknowledgeNotification({required String notificationId}) async {
+    final currentSnapshot = _state.snapshot;
+    if (currentSnapshot == null) {
+      throw StateError('No session available.');
+    }
+
+    _isAcknowledgingNotification = true;
+    _emitState(
+      DesktopSessionControllerState.data(
+        currentSnapshot,
+        isSubmitting: _state.isSubmitting,
+      ),
+    );
+
+    try {
+      await _runtime.acknowledgeNotification(notificationId: notificationId);
+      _isAcknowledgingNotification = false;
+      final latestSnapshot = _state.snapshot ?? currentSnapshot;
+      _emitState(
+        DesktopSessionControllerState.data(
+          latestSnapshot,
+          isSubmitting: _state.isSubmitting,
+        ),
+      );
+    } catch (error) {
+      _isAcknowledgingNotification = false;
+      final latestSnapshot = _state.snapshot ?? currentSnapshot;
+      _emitState(
+        DesktopSessionControllerState.data(
+          latestSnapshot,
+          isSubmitting: _state.isSubmitting,
+          acknowledgementErrorMessage: error.toString(),
+        ),
+      );
+      rethrow;
+    }
   }
 
   @protected
@@ -149,6 +196,7 @@ class DesktopSessionController extends ChangeNotifier {
           attachedClientId: attachedClientId,
         ),
         isSubmitting: _state.isSubmitting,
+        acknowledgementErrorMessage: _state.acknowledgementErrorMessage,
       ),
     );
   }

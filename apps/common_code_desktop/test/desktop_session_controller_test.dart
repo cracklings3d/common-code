@@ -101,6 +101,88 @@ void main() {
     });
 
     test(
+      'acknowledgement clears stale error at start and after success',
+      () async {
+        final runtime = _FakeDesktopSessionRuntime();
+        final controller = DesktopSessionController(runtime: runtime);
+
+        controller.emitState(
+          DesktopSessionControllerState.data(
+            _snapshot,
+            acknowledgementErrorMessage: 'old error',
+          ),
+        );
+
+        final acknowledgeFuture = controller.acknowledgeNotification(
+          notificationId: 'notice-1',
+        );
+
+        expect(controller.isAcknowledgingNotification, isTrue);
+        expect(controller.state.acknowledgementErrorMessage, isNull);
+        expect(runtime.acknowledgeCallCount, 1);
+
+        runtime.completeAcknowledge();
+        await acknowledgeFuture;
+
+        expect(controller.isAcknowledgingNotification, isFalse);
+        expect(controller.state.acknowledgementErrorMessage, isNull);
+        expect(controller.state.status, DesktopSessionControllerStatus.data);
+      },
+    );
+
+    test(
+      'acknowledgement failure stays on data state and surfaces message',
+      () async {
+        final runtime = _FakeDesktopSessionRuntime()
+          ..acknowledgementError = StateError('ack failed');
+        final controller = DesktopSessionController(runtime: runtime);
+
+        runtime.emitSnapshot(_snapshot.session);
+
+        await expectLater(
+          controller.acknowledgeNotification(notificationId: 'notice-1'),
+          throwsA(isA<StateError>()),
+        );
+
+        expect(controller.state.status, DesktopSessionControllerStatus.data);
+        expect(
+          controller.state.acknowledgementErrorMessage,
+          contains('ack failed'),
+        );
+      },
+    );
+
+    test(
+      'runtime snapshots do not clear acknowledgement failure message',
+      () async {
+        final runtime = _FakeDesktopSessionRuntime()
+          ..acknowledgementError = StateError('ack failed');
+        final controller = DesktopSessionController(runtime: runtime);
+
+        runtime.emitSnapshot(_snapshot.session);
+
+        await expectLater(
+          controller.acknowledgeNotification(notificationId: 'notice-1'),
+          throwsA(isA<StateError>()),
+        );
+
+        runtime.emitSnapshot(
+          _bootstrapSession().startTurn(
+            turnId: 'turn-1',
+            client: const Client(id: 'desktop-client'),
+            submittedText: 'unrelated runtime update',
+          ),
+        );
+
+        expect(controller.state.status, DesktopSessionControllerStatus.data);
+        expect(
+          controller.state.acknowledgementErrorMessage,
+          contains('ack failed'),
+        );
+      },
+    );
+
+    test(
       'submit failure surfaces as renderable error state and clears flag',
       () async {
         final runtime = _FakeDesktopSessionRuntime()
@@ -164,10 +246,13 @@ final class _FakeDesktopSessionRuntime implements DesktopSessionRuntime {
 
   final List<String> submittedTexts = <String>[];
   int submitCallCount = 0;
+  int acknowledgeCallCount = 0;
   Completer<void>? _pendingInitialize;
   Completer<void>? _pendingRefresh;
   Completer<void>? _pendingSubmit;
+  Completer<void>? _pendingAcknowledge;
   Object? submitError;
+  Object? acknowledgementError;
 
   @override
   void bind({
@@ -205,6 +290,18 @@ final class _FakeDesktopSessionRuntime implements DesktopSessionRuntime {
     return completer.future;
   }
 
+  @override
+  Future<void> acknowledgeNotification({required String notificationId}) async {
+    acknowledgeCallCount += 1;
+    if (acknowledgementError case final Object error) {
+      throw error;
+    }
+
+    final completer = Completer<void>();
+    _pendingAcknowledge = completer;
+    return completer.future;
+  }
+
   void emitSnapshot(Session session) {
     _onSnapshot?.call(session);
     _pendingInitialize?.complete();
@@ -226,10 +323,16 @@ final class _FakeDesktopSessionRuntime implements DesktopSessionRuntime {
     _pendingSubmit = null;
   }
 
+  void completeAcknowledge() {
+    _pendingAcknowledge?.complete();
+    _pendingAcknowledge = null;
+  }
+
   @override
   Future<void> dispose() async {
     _pendingInitialize?.complete();
     _pendingRefresh?.complete();
     _pendingSubmit?.complete();
+    _pendingAcknowledge?.complete();
   }
 }
