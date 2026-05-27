@@ -15,7 +15,6 @@ export 'desktop_session_runtime_constants.dart'
         desktopSessionRuntimeIdentityId;
 
 import 'desktop_session_runtime_constants.dart';
-import 'durable_local_host_service.dart';
 
 final class _RuntimeSessionContext {
   const _RuntimeSessionContext({

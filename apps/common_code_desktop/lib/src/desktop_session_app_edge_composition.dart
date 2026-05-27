@@ -1,3 +1,5 @@
+import 'dart:async';
+
 // ignore_for_file: implementation_imports
 
 import 'package:common_code_application/common_code_application.dart';
@@ -8,7 +10,6 @@ import 'package:host_core/host_core.dart';
 import 'package:host_in_memory/host_in_memory.dart';
 
 import 'desktop_session_runtime.dart';
-import 'durable_local_host_service.dart';
 
 CommonCodeSessionFacade createDesktopSessionFacade({
   CommonCodeSessionDriver? driver,
@@ -45,14 +46,22 @@ CommonCodeSessionFacade createDesktopSessionFacade({
         persistSessionMutation as void Function(Session session)?;
   } else {
     final hostAdapter = InMemoryHostAdapter();
-    final durableService = DurableLocalHostService.withAdapter(
-      hostAdapter: hostAdapter,
+    final bootstrapPort = CommonCodeSessionBootstrapPortAdapter(
       sessionStore: effectiveSessionStore,
+      host: CommonCodeSessionBootstrapHost(
+        restoreSession: hostAdapter.restoreSession,
+        createSession: hostAdapter.createSession,
+        attachClient: hostAdapter.attachClient,
+      ),
       diagnosticsPort: diagnosticsPort,
     );
     effectiveHostService = hostAdapter as HostService;
-    effectiveBootstrapPort = durableService;
-    effectivePersistSessionMutation = durableService.queueSessionPersistence;
+    effectiveBootstrapPort = bootstrapPort;
+    effectivePersistSessionMutation = _createPersistSessionMutation(
+      sessionStore: effectiveSessionStore,
+      attachedClientId: attachedClientId,
+      diagnosticsPort: diagnosticsPort,
+    );
   }
 
   final CommonCodeSessionDriver effectiveDriver =
@@ -124,23 +133,54 @@ HostDesktopSessionRuntime createDesktopSessionRuntime({
   }
 
   final hostAdapter = InMemoryHostAdapter();
-  final durableService = DurableLocalHostService.withAdapter(
-    hostAdapter: hostAdapter,
-    sessionStore: DurableLocalSessionStore.fromPersistenceComponents(
-      legacySnapshotStore: effectiveSnapshotStore,
-      durableStorage: durableStorage,
+  final sessionStore = DurableLocalSessionStore.fromPersistenceComponents(
+    legacySnapshotStore: effectiveSnapshotStore,
+    durableStorage: durableStorage,
+  );
+  final bootstrapPort = CommonCodeSessionBootstrapPortAdapter(
+    sessionStore: sessionStore,
+    host: CommonCodeSessionBootstrapHost(
+      restoreSession: hostAdapter.restoreSession,
+      createSession: hostAdapter.createSession,
+      attachClient: hostAdapter.attachClient,
     ),
     diagnosticsPort: diagnosticsPort,
   );
   return HostDesktopSessionRuntime(
     hostService: hostAdapter as HostService,
-    bootstrapPort: durableService,
+    bootstrapPort: bootstrapPort,
     snapshotStore: effectiveSnapshotStore,
-    persistSessionMutation: durableService.queueSessionPersistence,
+    persistSessionMutation: _createPersistSessionMutation(
+      sessionStore: sessionStore,
+      attachedClientId: attachedClientId,
+      diagnosticsPort: diagnosticsPort,
+    ),
     defaultSessionId: defaultSessionId,
     hostId: hostId,
     attachedClientId: attachedClientId,
   );
+}
+
+void Function(Session session) _createPersistSessionMutation({
+  required CommonCodeSessionStore sessionStore,
+  required String attachedClientId,
+  required DurableLocalHostDiagnosticsPort? diagnosticsPort,
+}) {
+  return (Session session) {
+    unawaited(
+      sessionStore
+          .queueSessionPersistence(session, attachedClientId: attachedClientId)
+          .catchError((Object error, StackTrace stackTrace) {
+            diagnosticsPort?.emit(
+              DurableLocalHostDiagnostic(
+                DurableLocalHostDiagnosticCode.durableWriteFailed,
+                error: error,
+                stackTrace: stackTrace,
+              ),
+            );
+          }),
+    );
+  };
 }
 
 final class HostCoreDesktopSessionDriver

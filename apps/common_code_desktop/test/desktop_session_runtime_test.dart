@@ -3,7 +3,6 @@ import 'dart:convert';
 
 import 'package:common_code_application/common_code_application.dart';
 import 'package:common_code_desktop/src/desktop_session_runtime.dart';
-import 'package:common_code_desktop/src/durable_local_host_service.dart';
 import 'package:common_code_domain/common_code_domain.dart';
 import 'package:common_code_observability/common_code_observability.dart';
 import 'package:common_code_persistence/common_code_persistence.dart';
@@ -253,18 +252,26 @@ void main() {
       );
       final snapshotStore = _MemoryLegacySnapshotStore();
       final hostAdapter = InMemoryHostAdapter();
-      final durableService = DurableLocalHostService.withAdapter(
-        hostAdapter: hostAdapter,
-        sessionStore: DurableLocalSessionStore.fromPersistenceComponents(
-          legacySnapshotStore: snapshotStore,
-          durableStorage: durableStorage,
+      final sessionStore = DurableLocalSessionStore.fromPersistenceComponents(
+        legacySnapshotStore: snapshotStore,
+        durableStorage: durableStorage,
+      );
+      final bootstrapPort = CommonCodeSessionBootstrapPortAdapter(
+        sessionStore: sessionStore,
+        host: CommonCodeSessionBootstrapHost(
+          restoreSession: hostAdapter.restoreSession,
+          createSession: hostAdapter.createSession,
+          attachClient: hostAdapter.attachClient,
         ),
       );
       final runtime = HostDesktopSessionRuntime(
         hostService: hostAdapter as HostService,
-        bootstrapPort: durableService,
+        bootstrapPort: bootstrapPort,
         snapshotStore: snapshotStore,
-        persistSessionMutation: durableService.queueSessionPersistence,
+        persistSessionMutation: _createPersistSessionMutation(
+          sessionStore,
+          attachedClientId: desktopSessionRuntimeAttachedClientId,
+        ),
       );
       Session? snapshot;
       runtime.bind(
@@ -456,21 +463,31 @@ void main() {
         final storage = _MemoryDurableStorage();
         final hostAdapter = InMemoryHostAdapter();
         final hostService = hostAdapter as HostService;
-        final durableService = DurableLocalHostService.withAdapter(
-          hostAdapter: hostAdapter,
-          sessionStore: DurableLocalSessionStore.fromPersistenceComponents(
-            legacySnapshotStore: _MemoryLegacySnapshotStore(),
-            durableStorage: storage,
+        final diagnosticsPort = DurableLocalHostDiagnosticsEmitter(
+          (diagnostic) => diagnostics.add(diagnostic.code),
+        );
+        final sessionStore = DurableLocalSessionStore.fromPersistenceComponents(
+          legacySnapshotStore: _MemoryLegacySnapshotStore(),
+          durableStorage: storage,
+        );
+        final bootstrapPort = CommonCodeSessionBootstrapPortAdapter(
+          sessionStore: sessionStore,
+          host: CommonCodeSessionBootstrapHost(
+            restoreSession: hostAdapter.restoreSession,
+            createSession: hostAdapter.createSession,
+            attachClient: hostAdapter.attachClient,
           ),
-          diagnosticsPort: DurableLocalHostDiagnosticsEmitter(
-            (diagnostic) => diagnostics.add(diagnostic.code),
-          ),
+          diagnosticsPort: diagnosticsPort,
         );
         final runtime = HostDesktopSessionRuntime(
           hostService: hostService,
-          bootstrapPort: durableService,
+          bootstrapPort: bootstrapPort,
           snapshotStore: _MemoryLegacySnapshotStore(),
-          persistSessionMutation: durableService.queueSessionPersistence,
+          persistSessionMutation: _createPersistSessionMutation(
+            sessionStore,
+            attachedClientId: desktopSessionRuntimeAttachedClientId,
+            diagnosticsPort: diagnosticsPort,
+          ),
         );
         Session? snapshot;
         runtime.bind(
@@ -482,7 +499,7 @@ void main() {
         storage.writeError = StateError('write failed');
 
         await runtime.submitTurn(submittedText: 'persist me');
-        await durableService.flushPendingWrites();
+        await sessionStore.waitForPendingPersistence();
 
         expect(snapshot, isNotNull);
         expect(
@@ -777,6 +794,24 @@ final class _BootstrapPortHostService extends _TrackingHostService
   CommonCodeSessionStore get sessionStore => _BootstrapPortSessionStore(this);
 
   @override
+  Future<CommonCodeDurableBootstrapLoadResult> loadDurableSessionCandidate({
+    required String attachedClientId,
+  }) {
+    return sessionStore.loadDurableSessionCandidate(
+      attachedClientId: attachedClientId,
+    );
+  }
+
+  @override
+  Future<CommonCodeLegacySeedLoadResult> loadLegacySeedSession({
+    required String attachedClientId,
+  }) {
+    return sessionStore.loadLegacySeedSession(
+      attachedClientId: attachedClientId,
+    );
+  }
+
+  @override
   Future<Session> createFreshSession(
     CommonCodeSessionBootstrapRequest request,
   ) async {
@@ -843,19 +878,28 @@ HostDesktopSessionRuntime _createDurableRuntime({
 }) {
   final effectiveSnapshotStore = snapshotStore ?? _MemoryLegacySnapshotStore();
   final hostAdapter = InMemoryHostAdapter();
-  final durableService = DurableLocalHostService.withAdapter(
-    hostAdapter: hostAdapter,
-    sessionStore: DurableLocalSessionStore.fromPersistenceComponents(
-      legacySnapshotStore: effectiveSnapshotStore,
-      durableStorage: durableStorage,
+  final sessionStore = DurableLocalSessionStore.fromPersistenceComponents(
+    legacySnapshotStore: effectiveSnapshotStore,
+    durableStorage: durableStorage,
+  );
+  final bootstrapPort = CommonCodeSessionBootstrapPortAdapter(
+    sessionStore: sessionStore,
+    host: CommonCodeSessionBootstrapHost(
+      restoreSession: hostAdapter.restoreSession,
+      createSession: hostAdapter.createSession,
+      attachClient: hostAdapter.attachClient,
     ),
     diagnosticsPort: diagnosticsPort,
   );
   return HostDesktopSessionRuntime(
     hostService: hostAdapter as HostService,
-    bootstrapPort: durableService,
+    bootstrapPort: bootstrapPort,
     snapshotStore: effectiveSnapshotStore,
-    persistSessionMutation: durableService.queueSessionPersistence,
+    persistSessionMutation: _createPersistSessionMutation(
+      sessionStore,
+      attachedClientId: desktopSessionRuntimeAttachedClientId,
+      diagnosticsPort: diagnosticsPort,
+    ),
   );
 }
 
@@ -865,40 +909,60 @@ HostDesktopSessionRuntime _createRejectingDurableRuntime({
   DurableLocalHostDiagnosticsPort? diagnosticsPort,
 }) {
   final hostAdapter = InMemoryHostAdapter();
-  final bootstrapPort = _RejectingRestoreDurableLocalHostService.withAdapter(
-    hostAdapter: hostAdapter,
-    sessionStore: DurableLocalSessionStore.fromPersistenceComponents(
-      legacySnapshotStore: snapshotStore,
-      durableStorage: durableStorage,
-    ),
+  final sessionStore = DurableLocalSessionStore.fromPersistenceComponents(
+    legacySnapshotStore: snapshotStore,
     durableStorage: durableStorage,
+  );
+  final bootstrapPort = _RejectingRestoreBootstrapPort(
+    sessionStore: sessionStore,
+    host: CommonCodeSessionBootstrapHost(
+      restoreSession: hostAdapter.restoreSession,
+      createSession: hostAdapter.createSession,
+      attachClient: hostAdapter.attachClient,
+    ),
     diagnosticsPort: diagnosticsPort,
   );
   return HostDesktopSessionRuntime(
     hostService: hostAdapter as HostService,
     bootstrapPort: bootstrapPort,
     snapshotStore: snapshotStore,
-    persistSessionMutation: bootstrapPort.queueSessionPersistence,
+    persistSessionMutation: _createPersistSessionMutation(
+      sessionStore,
+      attachedClientId: desktopSessionRuntimeAttachedClientId,
+      diagnosticsPort: diagnosticsPort,
+    ),
   );
 }
 
-final class _RejectingRestoreDurableLocalHostService
-    extends DurableLocalHostService {
-  _RejectingRestoreDurableLocalHostService.withAdapter({
-    required dynamic hostAdapter,
-    CommonCodeSessionStore? sessionStore,
-    Object? legacySnapshotStore,
-    Object? durableStorage,
-    Object? codec,
-    DurableLocalHostDiagnosticsPort? diagnosticsPort,
-  }) : super.withAdapter(
-         hostAdapter: hostAdapter,
-         sessionStore: sessionStore,
-         legacySnapshotStore: legacySnapshotStore,
-         durableStorage: durableStorage,
-         codec: codec,
-         diagnosticsPort: diagnosticsPort,
-       );
+void Function(Session session) _createPersistSessionMutation(
+  CommonCodeSessionStore sessionStore, {
+  required String attachedClientId,
+  DurableLocalHostDiagnosticsPort? diagnosticsPort,
+}) {
+  return (Session session) {
+    unawaited(
+      sessionStore
+          .queueSessionPersistence(session, attachedClientId: attachedClientId)
+          .catchError((Object error, StackTrace stackTrace) {
+            diagnosticsPort?.emit(
+              DurableLocalHostDiagnostic(
+                DurableLocalHostDiagnosticCode.durableWriteFailed,
+                error: error,
+                stackTrace: stackTrace,
+              ),
+            );
+          }),
+    );
+  };
+}
+
+class _RejectingRestoreBootstrapPort
+    extends CommonCodeSessionBootstrapPortAdapter {
+  _RejectingRestoreBootstrapPort({
+    required super.sessionStore,
+    required super.host,
+    super.diagnosticsPort,
+  });
 
   @override
   Session restoreDurableSession(Session session) {
