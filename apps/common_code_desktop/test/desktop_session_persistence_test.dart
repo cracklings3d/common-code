@@ -330,12 +330,19 @@ void main() {
         await runtime.initialize();
         await sessionStore.waitForPendingPersistence();
 
-        // Record the initial notifications
-        final initialNotifications = snapshot!.notifications;
+        // Emit a fresh session with known acknowledged+unacknowledged notifications
+        // through the watch stream. This is the non-vacuous baseline for AC2.
+        final streamedSnapshot = hostAdapter.emitStreamedSessionWithNotifications();
+        await sessionStore.waitForPendingPersistence();
 
-        // Capture initial payload to prove distinct write
+        // Capture the initial payload after the streamed emission
         final initialPayload = durableStorage.payload;
         expect(initialPayload, isNotNull);
+
+        // Record the initial notifications from the streamed snapshot
+        final initialNotificationMap = {
+          for (final n in streamedSnapshot.notifications) n.id: n,
+        };
 
         // Trigger a host-driven transition WITHOUT going through submitTurn.
         // This proves the watch path itself triggers persistence, not just
@@ -357,7 +364,8 @@ void main() {
         );
 
         // Verify notification ids are preserved verbatim through the watch path
-        for (final original in initialNotifications) {
+        // including isAcknowledged flags, turnId, and transition.
+        for (final original in initialNotificationMap.values) {
           final persisted = decoded.notifications.firstWhere(
             (n) => n.id == original.id,
             orElse: () => throw StateError(
@@ -615,6 +623,39 @@ final class _MultiEmittingInMemoryHostAdapter implements HostService {
   final Map<String, StreamController<Session>> _controllers =
       <String, StreamController<Session>>{};
 
+  /// Stages a queued turn with notifications, simulating a session that has
+  /// a turn waiting to be processed. Call this before advanceSessionToNextState()
+  /// to set up a non-empty notification baseline for preservation tests.
+  void stageQueuedTurnWithNotifications() {
+    for (final entry in _controllers.entries) {
+      final session = _sessions[entry.key];
+      if (session == null) continue;
+
+      final turnClientId = session.clients.isNotEmpty
+          ? session.clients.first.id
+          : 'reviewer-client';
+      final notification = SessionNotification.forTransition(
+        sessionId: session.id,
+        turnId: 'turn-1',
+        transition: SessionNotificationTransition.queuedToRunning,
+      );
+      final updated = Session(
+        id: session.id,
+        activeHost: session.activeHost,
+        clients: session.clients,
+        promptThread: session.promptThread.append(
+          Turn.queued(
+            id: 'turn-1',
+            clientId: turnClientId,
+            submittedText: 'Staged turn',
+          ),
+        ),
+        notifications: [...session.notifications, notification],
+      );
+      _sessions[entry.key] = updated;
+    }
+  }
+
   /// Emits a host-driven state transition directly through the watch stream
   /// without going through any mutation method (submitTurn, acknowledgeNotification).
   /// This simulates a transition that the host performs independently of client
@@ -626,41 +667,89 @@ final class _MultiEmittingInMemoryHostAdapter implements HostService {
 
       Session updated;
       if (session.activeTurn == null) {
-        // No active turn - create one with a queued->running notification
-        // and emit the snapshot directly. This simulates a host that pushes
-        // a complete transition snapshot through the watch stream.
-        // Use a client that exists in the session's clients list to avoid
-        // SessionFailure.inputClientNotAttached validation.
-        final turnClientId = session.clients.isNotEmpty
-            ? session.clients.first.id
-            : 'reviewer-client'; // Fallback for pre-attached-client session
-        final notification = SessionNotification.forTransition(
-          sessionId: session.id,
-          turnId: 'turn-1',
-          transition: SessionNotificationTransition.queuedToRunning,
-        );
-        updated = Session(
-          id: session.id,
-          activeHost: session.activeHost,
-          clients: session.clients,
-          promptThread: session.promptThread.append(
-            Turn.running(
-              id: 'turn-1',
-              clientId: turnClientId,
-              submittedText: 'Host-initiated turn',
-            ),
-          ),
-          notifications: [...session.notifications, notification],
-        );
+        // No active turn - stage a queued turn with a notification first.
+        // This ensures the test has a non-empty notification baseline.
+        stageQueuedTurnWithNotifications();
+        // Re-fetch the session after staging
+        final stagedSession = _sessions[entry.key]!;
+        // Now advance the staged queued turn to running - this should emit
+        // the queued->running notification
+        updated = _advanceQueuedTurnToRunning(stagedSession);
       } else if (session.activeTurn!.status == TurnStatus.queued) {
-        updated = session.advanceActiveTurnToRunning();
+        // Advance queued turn to running - emit queued->running notification
+        updated = _advanceQueuedTurnToRunning(session);
+      } else if (session.activeTurn!.status == TurnStatus.running) {
+        // Advance running turn to completed - emit running->completed notification
+        updated = _advanceRunningTurnToCompleted(session);
       } else {
-        continue; // Already running or completed
+        continue; // Already completed or failed
       }
 
       _sessions[entry.key] = updated;
       entry.value.add(updated);
     }
+  }
+
+  Session _advanceQueuedTurnToRunning(Session session) {
+    return session.advanceActiveTurnToRunning();
+  }
+
+  Session _advanceRunningTurnToCompleted(Session session) {
+    return session.completeActiveTurn();
+  }
+
+  /// Emits a fresh session with a known mix of acknowledged and unacknowledged
+  /// notifications directly through the watch stream, then returns the emitted
+  /// session. Use this to create a non-vacuous baseline for notification
+  /// preservation tests.
+  Session emitStreamedSessionWithNotifications() {
+    for (final entry in _controllers.entries) {
+      final session = _sessions[entry.key];
+      if (session == null) continue;
+
+      final turnId = session.promptThread.turns.isNotEmpty
+          ? 'turn-${session.promptThread.turns.length + 1}'
+          : 'turn-1';
+      final turnClientId = session.clients.isNotEmpty
+          ? session.clients.first.id
+          : 'reviewer-client';
+
+      // Create a session with both acknowledged and unacknowledged notifications
+      // so the preservation assertion is non-vacuous (AC2).
+      final notifications = <SessionNotification>[
+        SessionNotification.forTransition(
+          sessionId: session.id,
+          turnId: turnId,
+          transition: SessionNotificationTransition.queuedToRunning,
+          isAcknowledged: false,
+        ),
+        SessionNotification.forTransition(
+          sessionId: session.id,
+          turnId: turnId,
+          transition: SessionNotificationTransition.runningToCompleted,
+          isAcknowledged: true,
+        ),
+      ];
+
+      final queuedTurn = Turn.queued(
+        id: turnId,
+        clientId: turnClientId,
+        submittedText: 'Streamed turn',
+      );
+
+      final updated = Session(
+        id: session.id,
+        activeHost: session.activeHost,
+        clients: session.clients,
+        promptThread: session.promptThread.append(queuedTurn),
+        notifications: notifications,
+      );
+
+      _sessions[entry.key] = updated;
+      entry.value.add(updated);
+      return updated;
+    }
+    throw StateError('No active session controller to emit through');
   }
 
   @override
