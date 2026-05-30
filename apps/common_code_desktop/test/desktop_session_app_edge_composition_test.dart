@@ -3,7 +3,6 @@ import 'dart:convert';
 
 import 'package:common_code_application/common_code_application.dart';
 import 'package:common_code_desktop/src/desktop_session_app_edge_composition.dart';
-import 'package:common_code_desktop/src/desktop_session_facade_adapters.dart';
 import 'package:common_code_desktop/src/desktop_session_runtime.dart';
 import 'package:common_code_domain/common_code_domain.dart';
 import 'package:common_code_observability/common_code_observability.dart';
@@ -102,15 +101,14 @@ void main() {
     );
 
     test(
-      'streamed session transitions from host watch are persisted',
+      'watch path persists host-driven transition independently of explicit submitTurn',
       () async {
-        final persistedSessions = <Session>[];
         final durableStorage = _MemoryDurableStorage();
         final sessionStore = DurableLocalSessionStore.fromPersistenceComponents(
           legacySnapshotStore: _MemoryLegacySnapshotStore(),
           durableStorage: durableStorage,
         );
-        final hostAdapter = InMemoryHostAdapter();
+        final hostAdapter = _MultiEmittingInMemoryHostAdapter();
         final hostService = hostAdapter as HostService;
         final facade = createDesktopSessionFacade(
           hostService: hostService,
@@ -121,36 +119,56 @@ void main() {
               createSession: hostAdapter.createSession,
               attachClient: hostAdapter.attachClient,
             ),
-            diagnosticsPort: DurableLocalHostDiagnosticsEmitter(
-              (diagnostic) {},
-            ),
           ),
-          persistSessionMutation: (session) {
-            persistedSessions.add(session);
-            sessionStore.createPersistenceContinuation(
-              attachedClientId: desktopSessionRuntimeAttachedClientId,
-              onError: (e, s) {},
-            )(session);
-          },
+          persistSessionMutation: sessionStore.createPersistenceContinuation(
+            attachedClientId: desktopSessionRuntimeAttachedClientId,
+            onError: createDurableWriteFailureReporter(null),
+          ),
         );
 
         await facade.initialize();
-
-        // The fresh session has desktopSessionRuntimeAttachedClientId attached.
-        // Submit a turn to create an active turn - this will be emitted via watch.
-        await facade.submitTurn(submittedText: 'first turn');
-
         await sessionStore.waitForPendingPersistence();
 
-        // Verify that persistence was called at least twice:
-        // once for the initial bootstrap and once for the turn submission
-        expect(persistedSessions.length, greaterThanOrEqualTo(2));
-        // The last persisted session should have an active turn
-        expect(persistedSessions.last.activeTurn, isNotNull);
-        expect(
-          persistedSessions.last.activeTurn?.submittedText,
-          'first turn',
+        // Capture initial payload after initialize - baseline write from bootstrap
+        final initialPayload = durableStorage.payload;
+        expect(initialPayload, isNotNull);
+
+        // Trigger host-driven transition WITHOUT any explicit mutation (submitTurn, etc.)
+        // The _MultiEmittingInMemoryHostAdapter.advanceSessionToNextState() emits
+        // directly through the watch stream, simulating a host transition that occurs
+        // independently of client mutations. This proves the watch path itself,
+        // not mutation handlers, triggers persistence.
+        hostAdapter.advanceSessionToNextState();
+        await sessionStore.waitForPendingPersistence();
+
+        // Prove a distinct durable write occurred from the watch path
+        final payloadAfter = durableStorage.payload;
+        expect(payloadAfter, isNotNull);
+        expect(payloadAfter, isNot(equals(initialPayload)),
+            reason: 'Watch path must trigger distinct write beyond initialize()');
+
+        // Verify the persisted state reflects the host-driven advancement
+        final decoded = const SessionSnapshotCodec().decode(
+          jsonDecode(payloadAfter!),
+          desktopClientId: desktopSessionRuntimeAttachedClientId,
         );
+
+        // The host-driven advancement should have advanced the active turn
+        expect(decoded.promptThread.turns.last.status, TurnStatus.running);
+
+        // Verify notifications are preserved verbatim from the streamed path
+        final decodedNotifications = decoded.notifications;
+        expect(decodedNotifications, isNotEmpty,
+            reason: 'Notifications must be preserved through watch persistence');
+        for (final notification in decodedNotifications) {
+          expect(notification.id, isNotEmpty,
+              reason: 'Notification id must be deterministic and preserved');
+          expect(notification.turnId, isNotEmpty,
+              reason: 'Notification turnId must be preserved');
+          expect(notification.transition, isNotNull,
+              reason: 'Notification transition must be preserved');
+          // isAcknowledged flag must be verbatim from the streamed snapshot
+        }
 
         await facade.dispose();
       },
@@ -191,6 +209,56 @@ Session _completedSessionWithNotification() {
   );
 }
 
+Session _completedSessionWithNotifications() {
+  final session =
+      Session(
+            id: 'restored-session',
+            activeHost: const Host(id: 'restored-host'),
+            clients: const <Client>[
+              Client(id: desktopSessionRuntimeAttachedClientId),
+              Client(id: 'reviewer-client'),
+            ],
+          )
+          .startTurn(
+            turnId: 'turn-1',
+            client: const Client(id: 'reviewer-client'),
+            submittedText: 'First turn',
+          )
+          .advanceActiveTurnToRunning()
+          .completeActiveTurn()
+          .startTurn(
+            turnId: 'turn-2',
+            client: const Client(id: 'reviewer-client'),
+            submittedText: 'Second turn',
+          )
+          .advanceActiveTurnToRunning();
+
+  return Session(
+    id: session.id,
+    activeHost: session.activeHost,
+    clients: session.clients,
+    promptThread: session.promptThread,
+    notifications: <SessionNotification>[
+      SessionNotification.forTransition(
+        sessionId: session.id,
+        turnId: 'turn-1',
+        transition: SessionNotificationTransition.queuedToRunning,
+      ),
+      SessionNotification.forTransition(
+        sessionId: session.id,
+        turnId: 'turn-1',
+        transition: SessionNotificationTransition.runningToCompleted,
+        isAcknowledged: true,
+      ),
+      SessionNotification.forTransition(
+        sessionId: session.id,
+        turnId: 'turn-2',
+        transition: SessionNotificationTransition.queuedToRunning,
+      ),
+    ],
+  );
+}
+
 final class _MemoryLegacySnapshotStore implements SessionSnapshotStore {
   @override
   Future<Session?> readLatestSession({required String desktopClientId}) async {
@@ -223,5 +291,169 @@ final class _MemoryDurableStorage implements DurableSessionStore {
   @override
   Future<void> writeSessionPayload(String payload) async {
     this.payload = payload;
+  }
+}
+
+final class _MultiEmittingInMemoryHostAdapter implements HostService {
+  _MultiEmittingInMemoryHostAdapter();
+
+  final Map<String, Session> _sessions = <String, Session>{};
+  final Map<String, StreamController<Session>> _controllers =
+      <String, StreamController<Session>>{};
+
+  /// Emits a host-driven state transition directly through the watch stream
+  /// without going through any mutation method (submitTurn, acknowledgeNotification).
+  /// This simulates a transition that the host performs independently of client
+  /// mutations, proving the watch path triggers persistence.
+  void advanceSessionToNextState() {
+    for (final entry in _controllers.entries) {
+      final session = _sessions[entry.key];
+      if (session == null) continue;
+
+      Session updated;
+      if (session.activeTurn == null) {
+        // No active turn - create one with a queued->running notification
+        // and emit the snapshot directly. This simulates a host that pushes
+        // a complete transition snapshot through the watch stream.
+        // Use a client that exists in the session's clients list to avoid
+        // SessionFailure.inputClientNotAttached validation.
+        final turnClientId = session.clients.isNotEmpty
+            ? session.clients.first.id
+            : 'reviewer-client'; // Fallback for pre-attached-client session
+        final notification = SessionNotification.forTransition(
+          sessionId: session.id,
+          turnId: 'turn-1',
+          transition: SessionNotificationTransition.queuedToRunning,
+        );
+        updated = Session(
+          id: session.id,
+          activeHost: session.activeHost,
+          clients: session.clients,
+          promptThread: session.promptThread.append(
+            Turn.running(
+              id: 'turn-1',
+              clientId: turnClientId,
+              submittedText: 'Host-initiated turn',
+            ),
+          ),
+          notifications: [...session.notifications, notification],
+        );
+      } else if (session.activeTurn!.status == TurnStatus.queued) {
+        updated = session.advanceActiveTurnToRunning();
+      } else {
+        continue; // Already running or completed
+      }
+
+      _sessions[entry.key] = updated;
+      entry.value.add(updated);
+    }
+  }
+
+  @override
+  Session acknowledgeNotification({
+    required String sessionId,
+    required String notificationId,
+  }) {
+    final session = _sessions[sessionId]!;
+    var didAcknowledge = false;
+    final updatedSession = Session(
+      id: session.id,
+      activeHost: session.activeHost,
+      clients: session.clients,
+      promptThread: session.promptThread,
+      notifications: [
+        for (final notification in session.notifications)
+          if (notification.id == notificationId && !notification.isAcknowledged)
+            () {
+              didAcknowledge = true;
+              return SessionNotification.forTransition(
+                sessionId: session.id,
+                turnId: notification.turnId,
+                transition: notification.transition,
+                isAcknowledged: true,
+              );
+            }()
+          else
+            notification,
+      ],
+    );
+
+    if (!didAcknowledge) {
+      return session;
+    }
+
+    _sessions[sessionId] = updatedSession;
+    _controllers[sessionId]?.add(updatedSession);
+    return updatedSession;
+  }
+
+  @override
+  Session attachClient({required String sessionId, required Client client}) {
+    final updated = _sessions[sessionId]!.attachClient(client);
+    _sessions[sessionId] = updated;
+    _controllers[sessionId]?.add(updated);
+    return updated;
+  }
+
+  @override
+  Session createSession({required String sessionId, required Host activeHost}) {
+    final session = Session(id: sessionId, activeHost: activeHost);
+    _sessions[sessionId] = session;
+    return session;
+  }
+
+  @override
+  Session readSession(String sessionId) {
+    return _sessions[sessionId]!;
+  }
+
+  @override
+  Session restoreSession(Session session) {
+    _sessions[session.id] = session;
+    return session;
+  }
+
+  @override
+  Session submitTurn({
+    required String sessionId,
+    required Client client,
+    required String submittedText,
+  }) {
+    final session = _sessions[sessionId]!;
+    final turnNumber = session.promptThread.turns
+            .where((t) => t.clientId == client.id)
+            .length +
+        1;
+    final updated = session.startTurn(
+      turnId: 'turn-$turnNumber',
+      client: client,
+      submittedText: submittedText,
+    );
+    _sessions[sessionId] = updated;
+    _controllers[sessionId]?.add(updated);
+    return updated;
+  }
+
+  @override
+  Stream<Session> watchSession(String sessionId) {
+    if (_controllers.containsKey(sessionId)) {
+      throw const HostServiceFailure(
+        HostServiceFailureCode.activeSessionWatchAlreadyExists,
+        'Session already has an active watch.',
+      );
+    }
+
+    late final StreamController<Session> controller;
+    controller = StreamController<Session>(
+      sync: true,
+      onListen: () {
+        _controllers[sessionId] = controller;
+        controller.add(_sessions[sessionId]!);
+      },
+      onCancel: () {
+        _controllers.remove(sessionId);
+      },
+    );
+    return controller.stream;
   }
 }

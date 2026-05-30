@@ -56,7 +56,7 @@ CommonCodeSessionFacade createDesktopSessionFacade({
       );
 
   final CommonCodeSessionDriver effectiveDriver;
-  CommonCodeSessionObservation effectiveObservation;
+  final CommonCodeSessionObservation effectiveObservation;
   final HostGateway effectiveGateway;
   final sessionMutations = PersistingHostServiceSessionMutations(
     hostService: effectiveHostService,
@@ -85,12 +85,11 @@ CommonCodeSessionFacade createDesktopSessionFacade({
         ));
   } else {
     effectiveObservation =
-        observation ?? HostServiceSessionObservation(effectiveHostService);
-    final persistingObservation = PersistingDesktopSessionObservation(
-      wrapped: effectiveObservation,
-      persistSessionMutation: effectivePersistSessionMutation,
-    );
-    effectiveObservation = persistingObservation;
+        observation ??
+        PersistingHostServiceSessionObservation(
+          observation: HostServiceSessionObservation(effectiveHostService),
+          persistSessionMutation: effectivePersistSessionMutation,
+        );
     effectiveDriver = DesktopSessionBootstrapDriver(
       bootstrapPort: effectiveBootstrapPort,
       mutationPort: sessionMutations,
