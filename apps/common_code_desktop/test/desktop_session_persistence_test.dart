@@ -296,6 +296,319 @@ void main() {
     });
 
     test(
+      'host-driven streamed unacknowledged notifications replay after restart',
+      () async {
+        // AC1: Exercise full restart after host-driven streamed transitions emit
+        // notification-bearing Session updates that have not yet been acknowledged.
+        final durableStorage = _MemoryDurableStorage();
+        final firstHostAdapter = _MultiEmittingInMemoryHostAdapter();
+        final sessionStore = DurableLocalSessionStore.fromPersistenceComponents(
+          legacySnapshotStore: _MemoryLegacySnapshotStore(),
+          durableStorage: durableStorage,
+        );
+        final firstBootstrapPort = CommonCodeSessionBootstrapPortAdapter(
+          sessionStore: sessionStore,
+          host: CommonCodeSessionBootstrapHost(
+            restoreSession: firstHostAdapter.restoreSession,
+            createSession: firstHostAdapter.createSession,
+            attachClient: firstHostAdapter.attachClient,
+          ),
+        );
+        final firstRuntime = HostDesktopSessionRuntime(
+          hostService: _BootstrappedHostService(
+            hostService: firstHostAdapter as HostService,
+            bootstrapPort: firstBootstrapPort,
+          ),
+          bootstrapPort: firstBootstrapPort,
+          snapshotStore: _MemoryLegacySnapshotStore(),
+          persistSessionMutation: _createPersistSessionMutation(
+            sessionStore,
+            attachedClientId: desktopSessionRuntimeAttachedClientId,
+          ),
+        );
+        Session? firstSnapshot;
+        Object? watchError;
+        firstRuntime.bind(
+          onSnapshot: (session) => firstSnapshot = session,
+          onWatchError: (error, stackTrace) => watchError = error,
+        );
+
+        await firstRuntime.initialize();
+        await sessionStore.waitForPendingPersistence();
+
+        expect(watchError, isNull,
+            reason: 'First runtime watch must succeed');
+        expect(firstSnapshot, isNotNull,
+            reason: 'First runtime must receive snapshot');
+
+        // Emit host-driven streamed notifications through the watch path
+        // (not through submitTurn), proving watch itself triggers persistence.
+        final streamedSnapshot =
+            firstHostAdapter.emitStreamedSessionWithNotifications();
+        await sessionStore.waitForPendingPersistence();
+
+        // AC2: Prove still-unacknowledged notifications replay after restart
+        // from durable state. Record the unacknowledged notification IDs
+        // from the streamed snapshot so we can verify they survive restart.
+        final unacknowledgedNotificationIds = streamedSnapshot.notifications
+            .where((notification) => !notification.isAcknowledged)
+            .map((notification) => notification.id)
+            .toSet();
+
+        expect(unacknowledgedNotificationIds, isNotEmpty,
+            reason: 'AC2 requires at least one unacknowledged notification');
+
+        // Capture payload to prove persistence occurred
+        final payloadAfterStream = durableStorage.payload;
+        expect(payloadAfterStream, isNotNull,
+            reason: 'Streamed session must persist notification state');
+
+        // AC4: The assertion below will fail if streamed transitions emitted
+        // before restart are missing from restored state.
+        // Restart by creating a NEW runtime with fresh adapter over the SAME
+        // durable storage; the old adapter's active watch is discarded and
+        // the new adapter has no watch conflict.
+        final secondHostAdapter = _MultiEmittingInMemoryHostAdapter();
+        final secondBootstrapPort = CommonCodeSessionBootstrapPortAdapter(
+          sessionStore: sessionStore,
+          host: CommonCodeSessionBootstrapHost(
+            restoreSession: secondHostAdapter.restoreSession,
+            createSession: secondHostAdapter.createSession,
+            attachClient: secondHostAdapter.attachClient,
+          ),
+        );
+        final secondRuntime = HostDesktopSessionRuntime(
+          hostService: _BootstrappedHostService(
+            hostService: secondHostAdapter as HostService,
+            bootstrapPort: secondBootstrapPort,
+          ),
+          bootstrapPort: secondBootstrapPort,
+          snapshotStore: _MemoryLegacySnapshotStore(),
+          persistSessionMutation: _createPersistSessionMutation(
+            sessionStore,
+            attachedClientId: desktopSessionRuntimeAttachedClientId,
+          ),
+        );
+        Session? restartedSnapshot;
+        watchError = null;
+        secondRuntime.bind(
+          onSnapshot: (session) => restartedSnapshot = session,
+          onWatchError: (error, stackTrace) => watchError = error,
+        );
+
+        await secondRuntime.initialize();
+
+        expect(watchError, isNull,
+            reason: 'Restart watch must succeed (no active watch conflict)');
+        expect(restartedSnapshot, isNotNull,
+            reason: 'Restart must receive snapshot from persistence');
+
+        // AC2: Unacknowledged notifications from the streamed session MUST
+        // be present in the restarted runtime's snapshot - they replay.
+        final localSnapshot = restartedSnapshot!;
+        for (final notificationId in unacknowledgedNotificationIds) {
+          final found = localSnapshot.notifications.any(
+            (notification) =>
+                notification.id == notificationId &&
+                !notification.isAcknowledged,
+          );
+          expect(found, isTrue,
+              reason:
+                  'AC2: Unacknowledged notification $notificationId must '
+                  'replay after restart (was lost if this fails)');
+        }
+      },
+    );
+
+    test(
+      'acknowledged streamed notification does not replay after subsequent restart',
+      () async {
+        // AC3: Prove a notification acknowledged before restart does not
+        // replay again after the next restart.
+        final durableStorage = _MemoryDurableStorage();
+        final firstHostAdapter = _MultiEmittingInMemoryHostAdapter();
+        final sessionStore = DurableLocalSessionStore.fromPersistenceComponents(
+          legacySnapshotStore: _MemoryLegacySnapshotStore(),
+          durableStorage: durableStorage,
+        );
+        final firstBootstrapPort = CommonCodeSessionBootstrapPortAdapter(
+          sessionStore: sessionStore,
+          host: CommonCodeSessionBootstrapHost(
+            restoreSession: firstHostAdapter.restoreSession,
+            createSession: firstHostAdapter.createSession,
+            attachClient: firstHostAdapter.attachClient,
+          ),
+        );
+        final firstRuntime = HostDesktopSessionRuntime(
+          hostService: _BootstrappedHostService(
+            hostService: firstHostAdapter as HostService,
+            bootstrapPort: firstBootstrapPort,
+          ),
+          bootstrapPort: firstBootstrapPort,
+          snapshotStore: _MemoryLegacySnapshotStore(),
+          persistSessionMutation: _createPersistSessionMutation(
+            sessionStore,
+            attachedClientId: desktopSessionRuntimeAttachedClientId,
+          ),
+        );
+        Session? firstSnapshot;
+        Object? watchError;
+        firstRuntime.bind(
+          onSnapshot: (session) => firstSnapshot = session,
+          onWatchError: (error, stackTrace) => watchError = error,
+        );
+
+        await firstRuntime.initialize();
+        await sessionStore.waitForPendingPersistence();
+
+        expect(watchError, isNull,
+            reason: 'First runtime watch must succeed');
+        expect(firstSnapshot, isNotNull,
+            reason: 'First runtime must receive snapshot');
+
+        // Emit streamed notifications
+        final streamedSnapshot =
+            firstHostAdapter.emitStreamedSessionWithNotifications();
+        await sessionStore.waitForPendingPersistence();
+
+        // Record the notification IDs before acknowledgement
+        final unacknowledgedIdsBefore = streamedSnapshot.notifications
+            .where((notification) => !notification.isAcknowledged)
+            .map((notification) => notification.id)
+            .toSet();
+        // Acknowledge one unacknowledged notification and persist
+        final toAcknowledge = firstSnapshot!.notifications
+            .firstWhere((notification) => !notification.isAcknowledged);
+        final stillUnacknowledgedIds =
+            unacknowledgedIdsBefore.difference({toAcknowledge.id});
+        final acknowledgedSession = firstHostAdapter.acknowledgeNotification(
+          sessionId: firstSnapshot!.id,
+          notificationId: toAcknowledge.id,
+        );
+        _createPersistSessionMutation(
+          sessionStore,
+          attachedClientId: desktopSessionRuntimeAttachedClientId,
+        )(acknowledgedSession);
+        await sessionStore.waitForPendingPersistence();
+
+        // First restart: acknowledged notification should stay acknowledged,
+        // unacknowledged ones should still be present.
+        // Restart by creating a NEW runtime with fresh adapter over the SAME
+        // durable storage; the old adapter's active watch is discarded.
+        final secondHostAdapter = _MultiEmittingInMemoryHostAdapter();
+        final secondBootstrapPort = CommonCodeSessionBootstrapPortAdapter(
+          sessionStore: sessionStore,
+          host: CommonCodeSessionBootstrapHost(
+            restoreSession: secondHostAdapter.restoreSession,
+            createSession: secondHostAdapter.createSession,
+            attachClient: secondHostAdapter.attachClient,
+          ),
+        );
+        final secondRuntime = HostDesktopSessionRuntime(
+          hostService: _BootstrappedHostService(
+            hostService: secondHostAdapter as HostService,
+            bootstrapPort: secondBootstrapPort,
+          ),
+          bootstrapPort: secondBootstrapPort,
+          snapshotStore: _MemoryLegacySnapshotStore(),
+          persistSessionMutation: _createPersistSessionMutation(
+            sessionStore,
+            attachedClientId: desktopSessionRuntimeAttachedClientId,
+          ),
+        );
+        Session? secondSnapshot;
+        watchError = null;
+        secondRuntime.bind(
+          onSnapshot: (session) => secondSnapshot = session,
+          onWatchError: (error, stackTrace) => watchError = error,
+        );
+
+        await secondRuntime.initialize();
+
+        expect(watchError, isNull,
+            reason: 'First restart watch must succeed (no active watch conflict)');
+        expect(secondSnapshot, isNotNull,
+            reason: 'First restart must receive snapshot from persistence');
+
+        // Verify acknowledgement persisted across first restart
+        final acknowledgedInSecond = secondSnapshot!.notifications.firstWhere(
+          (notification) => notification.id == toAcknowledge.id,
+        );
+        expect(acknowledgedInSecond.isAcknowledged, isTrue,
+            reason: 'Acknowledgement must persist through restart');
+
+        // Unacknowledged notifications must still be present after restart
+        final localSecondSnapshot = secondSnapshot!;
+        for (final id in stillUnacknowledgedIds) {
+          final found = localSecondSnapshot.notifications.any(
+            (notification) => notification.id == id && !notification.isAcknowledged,
+          );
+          expect(found, isTrue,
+              reason: 'Unacknowledged notification $id must survive restart');
+        }
+
+        // Second restart: acknowledged notification must NOT replay as
+        // unacknowledged - proving AC3.
+        // Restart by creating a NEW runtime with fresh adapter over the SAME
+        // durable storage.
+        final thirdHostAdapter = _MultiEmittingInMemoryHostAdapter();
+        final thirdBootstrapPort = CommonCodeSessionBootstrapPortAdapter(
+          sessionStore: sessionStore,
+          host: CommonCodeSessionBootstrapHost(
+            restoreSession: thirdHostAdapter.restoreSession,
+            createSession: thirdHostAdapter.createSession,
+            attachClient: thirdHostAdapter.attachClient,
+          ),
+        );
+        final thirdRuntime = HostDesktopSessionRuntime(
+          hostService: _BootstrappedHostService(
+            hostService: thirdHostAdapter as HostService,
+            bootstrapPort: thirdBootstrapPort,
+          ),
+          bootstrapPort: thirdBootstrapPort,
+          snapshotStore: _MemoryLegacySnapshotStore(),
+          persistSessionMutation: _createPersistSessionMutation(
+            sessionStore,
+            attachedClientId: desktopSessionRuntimeAttachedClientId,
+          ),
+        );
+        Session? thirdSnapshot;
+        watchError = null;
+        thirdRuntime.bind(
+          onSnapshot: (session) => thirdSnapshot = session,
+          onWatchError: (error, stackTrace) => watchError = error,
+        );
+
+        await thirdRuntime.initialize();
+
+        expect(watchError, isNull,
+            reason: 'Second restart watch must succeed (no active watch conflict)');
+        expect(thirdSnapshot, isNotNull,
+            reason: 'Second restart must receive snapshot from persistence');
+
+        // AC3: The notification that was acknowledged before the second restart
+        // must STILL be acknowledged after the third restart - it does not replay.
+        final acknowledgedInThird = thirdSnapshot!.notifications.firstWhere(
+          (notification) => notification.id == toAcknowledge.id,
+        );
+        expect(acknowledgedInThird.isAcknowledged, isTrue,
+            reason:
+                'AC3: Acknowledged notification must not replay as '
+                'unacknowledged after subsequent restart');
+
+        // Unacknowledged notifications must still be present
+        final localThirdSnapshot = thirdSnapshot!;
+        for (final id in stillUnacknowledgedIds) {
+          final found = localThirdSnapshot.notifications.any(
+            (notification) => notification.id == id && !notification.isAcknowledged,
+          );
+          expect(found, isTrue,
+              reason: 'Unacknowledged notification $id must survive restart');
+        }
+      },
+    );
+
+    test(
       'streamed transition preserves notification ids and acknowledgement flags verbatim',
       () async {
         final durableStorage = _MemoryDurableStorage();
