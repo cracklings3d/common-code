@@ -185,6 +185,7 @@ final class HostDesktopSessionRuntime implements DesktopSessionRuntime {
           }
 
           _onSnapshot?.call(session);
+          _persistSessionMutationForResolvedService()?.call(session);
           if (!firstOutcomeSettled.isCompleted) {
             firstOutcomeSettled.complete();
           }

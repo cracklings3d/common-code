@@ -3,6 +3,7 @@ import 'dart:convert';
 
 import 'package:common_code_application/common_code_application.dart';
 import 'package:common_code_desktop/src/desktop_session_app_edge_composition.dart';
+import 'package:common_code_desktop/src/desktop_session_facade_adapters.dart';
 import 'package:common_code_desktop/src/desktop_session_runtime.dart';
 import 'package:common_code_domain/common_code_domain.dart';
 import 'package:common_code_observability/common_code_observability.dart';
@@ -94,6 +95,61 @@ void main() {
               .firstWhere((notification) => notification.id == notificationId)
               .isAcknowledged,
           isTrue,
+        );
+
+        await facade.dispose();
+      },
+    );
+
+    test(
+      'streamed session transitions from host watch are persisted',
+      () async {
+        final persistedSessions = <Session>[];
+        final durableStorage = _MemoryDurableStorage();
+        final sessionStore = DurableLocalSessionStore.fromPersistenceComponents(
+          legacySnapshotStore: _MemoryLegacySnapshotStore(),
+          durableStorage: durableStorage,
+        );
+        final hostAdapter = InMemoryHostAdapter();
+        final hostService = hostAdapter as HostService;
+        final facade = createDesktopSessionFacade(
+          hostService: hostService,
+          bootstrapPort: CommonCodeSessionBootstrapPortAdapter(
+            sessionStore: sessionStore,
+            host: CommonCodeSessionBootstrapHost(
+              restoreSession: hostAdapter.restoreSession,
+              createSession: hostAdapter.createSession,
+              attachClient: hostAdapter.attachClient,
+            ),
+            diagnosticsPort: DurableLocalHostDiagnosticsEmitter(
+              (diagnostic) {},
+            ),
+          ),
+          persistSessionMutation: (session) {
+            persistedSessions.add(session);
+            sessionStore.createPersistenceContinuation(
+              attachedClientId: desktopSessionRuntimeAttachedClientId,
+              onError: (e, s) {},
+            )(session);
+          },
+        );
+
+        await facade.initialize();
+
+        // The fresh session has desktopSessionRuntimeAttachedClientId attached.
+        // Submit a turn to create an active turn - this will be emitted via watch.
+        await facade.submitTurn(submittedText: 'first turn');
+
+        await sessionStore.waitForPendingPersistence();
+
+        // Verify that persistence was called at least twice:
+        // once for the initial bootstrap and once for the turn submission
+        expect(persistedSessions.length, greaterThanOrEqualTo(2));
+        // The last persisted session should have an active turn
+        expect(persistedSessions.last.activeTurn, isNotNull);
+        expect(
+          persistedSessions.last.activeTurn?.submittedText,
+          'first turn',
         );
 
         await facade.dispose();
