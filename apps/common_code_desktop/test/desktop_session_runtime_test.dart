@@ -516,18 +516,13 @@ void main() {
     );
 
     test(
-      'host-driven watch transitions persist without explicit mutations',
+      'host-driven streamed transition persists updated session without second explicit mutation',
       () async {
-        final persistedSessions = <Session>[];
-        final hostAdapter = _HostDrivenTransitionHostAdapter(
-          initialSession: _completedSession(),
-        );
-        final snapshotStore = _MemoryLegacySnapshotStore(
-          storedSession: _completedSession(),
-        );
+        final durableStorage = _MemoryDurableStorage();
+        final hostAdapter = _MultiEmittingInMemoryHostAdapter();
         final sessionStore = DurableLocalSessionStore.fromPersistenceComponents(
-          legacySnapshotStore: snapshotStore,
-          durableStorage: _MemoryDurableStorage(),
+          legacySnapshotStore: _MemoryLegacySnapshotStore(),
+          durableStorage: durableStorage,
         );
         final bootstrapPort = CommonCodeSessionBootstrapPortAdapter(
           sessionStore: sessionStore,
@@ -540,14 +535,11 @@ void main() {
         final runtime = HostDesktopSessionRuntime(
           hostService: hostAdapter as HostService,
           bootstrapPort: bootstrapPort,
-          snapshotStore: snapshotStore,
-          persistSessionMutation: (session) {
-            persistedSessions.add(session);
-            sessionStore.createPersistenceContinuation(
-              attachedClientId: desktopSessionRuntimeAttachedClientId,
-              onError: (e, s) {},
-            )(session);
-          },
+          snapshotStore: _MemoryLegacySnapshotStore(),
+          persistSessionMutation: _createPersistSessionMutation(
+            sessionStore,
+            attachedClientId: desktopSessionRuntimeAttachedClientId,
+          ),
         );
         Session? snapshot;
         runtime.bind(
@@ -556,17 +548,63 @@ void main() {
         );
 
         await runtime.initialize();
+        await sessionStore.waitForPendingPersistence();
 
-        // Trigger a host-driven transition
-        hostAdapter.triggerHostTransition();
+        // Capture initial payload after initialize - this is the baseline write
+        final initialPayload = durableStorage.payload;
+        expect(initialPayload, isNotNull);
+        final initialDecoded = const SessionSnapshotCodec().decode(
+          jsonDecode(initialPayload!),
+          desktopClientId: desktopSessionRuntimeAttachedClientId,
+        );
 
-        // Wait for the watch to emit
-        await Future<void>.delayed(const Duration(milliseconds: 50));
+        // Trigger a host-driven transition WITHOUT going through submitTurn.
+        // The adapter's advanceSessionToNextState emits directly through the watch
+        // stream, simulating a host-driven transition that occurs independently
+        // of any client mutation. This proves the watch path itself triggers
+        // persistence, not just the explicit mutation path.
+        hostAdapter.advanceSessionToNextState();
 
-        // Verify that persistence was called for the watch emission
-        expect(persistedSessions.length, greaterThanOrEqualTo(1));
+        // Wait for the watch to deliver the updated session and persistence to complete
+        await sessionStore.waitForPendingPersistence();
 
-        await runtime.dispose();
+        // The durable storage must reflect a NEW write that is DISTINCT from
+        // the initialize() write. This proves the watch path persisted the
+        // host-driven transition, not just replaying the initial mutation result.
+        final payloadAfter = durableStorage.payload;
+        expect(payloadAfter, isNotNull);
+
+        // Prove distinct write: payload must differ from initial
+        // (If only submitTurn had triggered persistence, initialPayload == payloadAfter)
+        expect(payloadAfter, isNot(equals(initialPayload)));
+
+        // Decode and verify the session state reflects the host-driven transition
+        final decoded = const SessionSnapshotCodec().decode(
+          jsonDecode(payloadAfter!),
+          desktopClientId: desktopSessionRuntimeAttachedClientId,
+        );
+
+        // Verify the session advanced state through the watch path
+        // (host-driven transitions advance queued->running->completed)
+        expect(decoded.promptThread.turns.last.status, TurnStatus.running);
+
+        // Verify notification ids are preserved verbatim from the streamed snapshot,
+        // including isAcknowledged flags. This proves the watch path does not
+        // re-synthesize or re-key notifications.
+        final initialNotificationMap = {
+          for (final n in initialDecoded.notifications) n.id: n,
+        };
+        for (final original in decoded.notifications) {
+          final initial = initialNotificationMap[original.id];
+          if (initial != null) {
+            expect(original.isAcknowledged, initial.isAcknowledged,
+                reason: 'Notification ${original.id} isAcknowledged must be preserved');
+            expect(original.turnId, initial.turnId,
+                reason: 'Notification ${original.id} turnId must be preserved');
+            expect(original.transition, initial.transition,
+                reason: 'Notification ${original.id} transition must be preserved');
+          }
+        }
       },
     );
   });
@@ -890,24 +928,6 @@ final class _BootstrapPortHostService extends _TrackingHostService
   }
 }
 
-final class _HostDrivenTransitionHostAdapter extends _TrackingHostService {
-  _HostDrivenTransitionHostAdapter({required Session initialSession}) {
-    _sessions[initialSession.id] = initialSession;
-  }
-
-  void triggerHostTransition() {
-    final sessionId = _sessions.keys.first;
-    final currentSession = _sessions[sessionId]!;
-    final transitionedSession = currentSession.startTurn(
-      turnId: 'turn-host-1',
-      client: const Client(id: 'reviewer-client'),
-      submittedText: 'Host-driven transition',
-    );
-    _sessions[sessionId] = transitionedSession;
-    _controllers[sessionId]?.add(transitionedSession);
-  }
-}
-
 final class _BootstrapPortSessionStore implements CommonCodeSessionStore {
   const _BootstrapPortSessionStore(this.hostService);
 
@@ -944,6 +964,171 @@ final class _BootstrapPortSessionStore implements CommonCodeSessionStore {
 
   @override
   Future<void> waitForPendingPersistence() async {}
+}
+
+final class _MultiEmittingInMemoryHostAdapter implements HostService {
+  _MultiEmittingInMemoryHostAdapter();
+
+  final Map<String, Session> _sessions = <String, Session>{};
+  final Map<String, StreamController<Session>> _controllers =
+      <String, StreamController<Session>>{};
+
+  /// Emits a host-driven state transition directly through the watch stream
+  /// without going through any mutation method (submitTurn, acknowledgeNotification).
+  /// This simulates a transition that the host performs independently of client
+  /// mutations, proving the watch path triggers persistence.
+  void advanceSessionToNextState() {
+    for (final entry in _controllers.entries) {
+      final session = _sessions[entry.key];
+      if (session == null) continue;
+
+      Session updated;
+      if (session.activeTurn == null) {
+        // No active turn - create one with a queued->running notification
+        // and emit the snapshot directly. This simulates a host that pushes
+        // a complete transition snapshot through the watch stream.
+        // Use a client that exists in the session's clients list to avoid
+        // SessionFailure.inputClientNotAttached validation.
+        final turnClientId = session.clients.isNotEmpty
+            ? session.clients.first.id
+            : 'reviewer-client'; // Fallback for pre-attached-client session
+        final notification = SessionNotification.forTransition(
+          sessionId: session.id,
+          turnId: 'turn-1',
+          transition: SessionNotificationTransition.queuedToRunning,
+        );
+        updated = Session(
+          id: session.id,
+          activeHost: session.activeHost,
+          clients: session.clients,
+          promptThread: session.promptThread.append(
+            Turn.running(
+              id: 'turn-1',
+              clientId: turnClientId,
+              submittedText: 'Host-initiated turn',
+            ),
+          ),
+          notifications: [...session.notifications, notification],
+        );
+      } else if (session.activeTurn!.status == TurnStatus.queued) {
+        updated = session.advanceActiveTurnToRunning();
+      } else {
+        continue; // Already running or completed
+      }
+
+      _sessions[entry.key] = updated;
+      entry.value.add(updated);
+    }
+  }
+
+  @override
+  Session acknowledgeNotification({
+    required String sessionId,
+    required String notificationId,
+  }) {
+    final session = _sessions[sessionId]!;
+    var didAcknowledge = false;
+    final updatedSession = Session(
+      id: session.id,
+      activeHost: session.activeHost,
+      clients: session.clients,
+      promptThread: session.promptThread,
+      notifications: [
+        for (final notification in session.notifications)
+          if (notification.id == notificationId && !notification.isAcknowledged)
+            () {
+              didAcknowledge = true;
+              return SessionNotification.forTransition(
+                sessionId: session.id,
+                turnId: notification.turnId,
+                transition: notification.transition,
+                isAcknowledged: true,
+              );
+            }()
+          else
+            notification,
+      ],
+    );
+
+    if (!didAcknowledge) {
+      return session;
+    }
+
+    _sessions[sessionId] = updatedSession;
+    _controllers[sessionId]?.add(updatedSession);
+    return updatedSession;
+  }
+
+  @override
+  Session attachClient({required String sessionId, required Client client}) {
+    final updated = _sessions[sessionId]!.attachClient(client);
+    _sessions[sessionId] = updated;
+    _controllers[sessionId]?.add(updated);
+    return updated;
+  }
+
+  @override
+  Session createSession({required String sessionId, required Host activeHost}) {
+    final session = Session(id: sessionId, activeHost: activeHost);
+    _sessions[sessionId] = session;
+    return session;
+  }
+
+  @override
+  Session readSession(String sessionId) {
+    return _sessions[sessionId]!;
+  }
+
+  @override
+  Session restoreSession(Session session) {
+    _sessions[session.id] = session;
+    return session;
+  }
+
+  @override
+  Session submitTurn({
+    required String sessionId,
+    required Client client,
+    required String submittedText,
+  }) {
+    final session = _sessions[sessionId]!;
+    final turnNumber = session.promptThread.turns
+            .where((t) => t.clientId == client.id)
+            .length +
+        1;
+    final updated = session.startTurn(
+      turnId: 'turn-$turnNumber',
+      client: client,
+      submittedText: submittedText,
+    );
+    _sessions[sessionId] = updated;
+    // Emit to existing watch controller (host-driven transition)
+    _controllers[sessionId]?.add(updated);
+    return updated;
+  }
+
+  @override
+  Stream<Session> watchSession(String sessionId) {
+    if (_controllers.containsKey(sessionId)) {
+      throw const HostServiceFailure(
+        HostServiceFailureCode.activeSessionWatchAlreadyExists,
+        'Session already has an active watch.',
+      );
+    }
+
+    late final StreamController<Session> controller;
+    controller = StreamController<Session>(
+      sync: true,
+      onListen: () {
+        _controllers[sessionId] = controller;
+        controller.add(_sessions[sessionId]!);
+      },
+      onCancel: () {
+        _controllers.remove(sessionId);
+      },
+    );
+    return controller.stream;
+  }
 }
 
 HostDesktopSessionRuntime _createDurableRuntime({

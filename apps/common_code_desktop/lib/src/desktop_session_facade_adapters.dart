@@ -102,20 +102,21 @@ final class HostServiceSessionObservation
   }
 }
 
-final class PersistingDesktopSessionObservation
+final class PersistingHostServiceSessionObservation
     implements CommonCodeSessionObservation {
-  const PersistingDesktopSessionObservation({
-    required CommonCodeSessionObservation wrapped,
+  const PersistingHostServiceSessionObservation({
+    required CommonCodeSessionObservation observation,
     required void Function(Session session)? persistSessionMutation,
-  }) : _wrapped = wrapped,
+  }) : _observation = observation,
        _persistSessionMutation = persistSessionMutation;
 
-  final CommonCodeSessionObservation _wrapped;
+  final CommonCodeSessionObservation _observation;
   final void Function(Session session)? _persistSessionMutation;
 
   @override
   Stream<Session> watchSession(String sessionId) {
-    return _wrapped.watchSession(sessionId).map((session) {
+    final baseStream = _observation.watchSession(sessionId);
+    return baseStream.map((session) {
       _persistSessionMutation?.call(session);
       return session;
     });

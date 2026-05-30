@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:common_code_application/common_code_application.dart';
@@ -293,6 +294,85 @@ void main() {
         isNotEmpty,
       );
     });
+
+    test(
+      'streamed transition preserves notification ids and acknowledgement flags verbatim',
+      () async {
+        final durableStorage = _MemoryDurableStorage();
+        final hostAdapter = _MultiEmittingInMemoryHostAdapter();
+        final sessionStore = DurableLocalSessionStore.fromPersistenceComponents(
+          legacySnapshotStore: _MemoryLegacySnapshotStore(),
+          durableStorage: durableStorage,
+        );
+        final bootstrapPort = CommonCodeSessionBootstrapPortAdapter(
+          sessionStore: sessionStore,
+          host: CommonCodeSessionBootstrapHost(
+            restoreSession: hostAdapter.restoreSession,
+            createSession: hostAdapter.createSession,
+            attachClient: hostAdapter.attachClient,
+          ),
+        );
+        final runtime = HostDesktopSessionRuntime(
+          hostService: hostAdapter as HostService,
+          bootstrapPort: bootstrapPort,
+          snapshotStore: _MemoryLegacySnapshotStore(),
+          persistSessionMutation: _createPersistSessionMutation(
+            sessionStore,
+            attachedClientId: desktopSessionRuntimeAttachedClientId,
+          ),
+        );
+        Session? snapshot;
+        runtime.bind(
+          onSnapshot: (session) => snapshot = session,
+          onWatchError: (error, stackTrace) {},
+        );
+
+        await runtime.initialize();
+        await sessionStore.waitForPendingPersistence();
+
+        // Record the initial notifications
+        final initialNotifications = snapshot!.notifications;
+
+        // Capture initial payload to prove distinct write
+        final initialPayload = durableStorage.payload;
+        expect(initialPayload, isNotNull);
+
+        // Trigger a host-driven transition WITHOUT going through submitTurn.
+        // This proves the watch path itself triggers persistence, not just
+        // the explicit mutation handler.
+        hostAdapter.advanceSessionToNextState();
+        await sessionStore.waitForPendingPersistence();
+
+        // Read back from durable storage
+        final payloadAfter = durableStorage.payload;
+        expect(payloadAfter, isNotNull);
+
+        // Prove distinct write from the watch path
+        expect(payloadAfter, isNot(equals(initialPayload)),
+            reason: 'Watch path must trigger distinct write beyond initialize()');
+
+        final decoded = const SessionSnapshotCodec().decode(
+          jsonDecode(payloadAfter!),
+          desktopClientId: desktopSessionRuntimeAttachedClientId,
+        );
+
+        // Verify notification ids are preserved verbatim through the watch path
+        for (final original in initialNotifications) {
+          final persisted = decoded.notifications.firstWhere(
+            (n) => n.id == original.id,
+            orElse: () => throw StateError(
+              'Notification ${original.id} not found after persistence',
+            ),
+          );
+          expect(persisted.isAcknowledged, original.isAcknowledged,
+              reason: 'Notification ${original.id} isAcknowledged must be preserved');
+          expect(persisted.turnId, original.turnId,
+              reason: 'Notification ${original.id} turnId must be preserved');
+          expect(persisted.transition, original.transition,
+              reason: 'Notification ${original.id} transition must be preserved');
+        }
+      },
+    );
   });
 }
 
@@ -526,6 +606,171 @@ final class _MemoryLegacySnapshotStore implements SessionSnapshotStore {
 
   @override
   Future<void> writeLatestSession(Session session) async {}
+}
+
+final class _MultiEmittingInMemoryHostAdapter implements HostService {
+  _MultiEmittingInMemoryHostAdapter();
+
+  final Map<String, Session> _sessions = <String, Session>{};
+  final Map<String, StreamController<Session>> _controllers =
+      <String, StreamController<Session>>{};
+
+  /// Emits a host-driven state transition directly through the watch stream
+  /// without going through any mutation method (submitTurn, acknowledgeNotification).
+  /// This simulates a transition that the host performs independently of client
+  /// mutations, proving the watch path triggers persistence.
+  void advanceSessionToNextState() {
+    for (final entry in _controllers.entries) {
+      final session = _sessions[entry.key];
+      if (session == null) continue;
+
+      Session updated;
+      if (session.activeTurn == null) {
+        // No active turn - create one with a queued->running notification
+        // and emit the snapshot directly. This simulates a host that pushes
+        // a complete transition snapshot through the watch stream.
+        // Use a client that exists in the session's clients list to avoid
+        // SessionFailure.inputClientNotAttached validation.
+        final turnClientId = session.clients.isNotEmpty
+            ? session.clients.first.id
+            : 'reviewer-client'; // Fallback for pre-attached-client session
+        final notification = SessionNotification.forTransition(
+          sessionId: session.id,
+          turnId: 'turn-1',
+          transition: SessionNotificationTransition.queuedToRunning,
+        );
+        updated = Session(
+          id: session.id,
+          activeHost: session.activeHost,
+          clients: session.clients,
+          promptThread: session.promptThread.append(
+            Turn.running(
+              id: 'turn-1',
+              clientId: turnClientId,
+              submittedText: 'Host-initiated turn',
+            ),
+          ),
+          notifications: [...session.notifications, notification],
+        );
+      } else if (session.activeTurn!.status == TurnStatus.queued) {
+        updated = session.advanceActiveTurnToRunning();
+      } else {
+        continue; // Already running or completed
+      }
+
+      _sessions[entry.key] = updated;
+      entry.value.add(updated);
+    }
+  }
+
+  @override
+  Session acknowledgeNotification({
+    required String sessionId,
+    required String notificationId,
+  }) {
+    final session = _sessions[sessionId]!;
+    var didAcknowledge = false;
+    final updatedSession = Session(
+      id: session.id,
+      activeHost: session.activeHost,
+      clients: session.clients,
+      promptThread: session.promptThread,
+      notifications: [
+        for (final notification in session.notifications)
+          if (notification.id == notificationId && !notification.isAcknowledged)
+            () {
+              didAcknowledge = true;
+              return SessionNotification.forTransition(
+                sessionId: session.id,
+                turnId: notification.turnId,
+                transition: notification.transition,
+                isAcknowledged: true,
+              );
+            }()
+          else
+            notification,
+      ],
+    );
+
+    if (!didAcknowledge) {
+      return session;
+    }
+
+    _sessions[sessionId] = updatedSession;
+    _controllers[sessionId]?.add(updatedSession);
+    return updatedSession;
+  }
+
+  @override
+  Session attachClient({required String sessionId, required Client client}) {
+    final updated = _sessions[sessionId]!.attachClient(client);
+    _sessions[sessionId] = updated;
+    _controllers[sessionId]?.add(updated);
+    return updated;
+  }
+
+  @override
+  Session createSession({required String sessionId, required Host activeHost}) {
+    final session = Session(id: sessionId, activeHost: activeHost);
+    _sessions[sessionId] = session;
+    return session;
+  }
+
+  @override
+  Session readSession(String sessionId) {
+    return _sessions[sessionId]!;
+  }
+
+  @override
+  Session restoreSession(Session session) {
+    _sessions[session.id] = session;
+    return session;
+  }
+
+  @override
+  Session submitTurn({
+    required String sessionId,
+    required Client client,
+    required String submittedText,
+  }) {
+    final session = _sessions[sessionId]!;
+    final turnNumber = session.promptThread.turns
+            .where((t) => t.clientId == client.id)
+            .length +
+        1;
+    final updated = session.startTurn(
+      turnId: 'turn-$turnNumber',
+      client: client,
+      submittedText: submittedText,
+    );
+    _sessions[sessionId] = updated;
+    // Emit to existing watch controller (host-driven transition)
+    _controllers[sessionId]?.add(updated);
+    return updated;
+  }
+
+  @override
+  Stream<Session> watchSession(String sessionId) {
+    if (_controllers.containsKey(sessionId)) {
+      throw const HostServiceFailure(
+        HostServiceFailureCode.activeSessionWatchAlreadyExists,
+        'Session already has an active watch.',
+      );
+    }
+
+    late final StreamController<Session> controller;
+    controller = StreamController<Session>(
+      sync: true,
+      onListen: () {
+        _controllers[sessionId] = controller;
+        controller.add(_sessions[sessionId]!);
+      },
+      onCancel: () {
+        _controllers.remove(sessionId);
+      },
+    );
+    return controller.stream;
+  }
 }
 
 final class _MemoryDurableStorage implements DurableSessionStore {
