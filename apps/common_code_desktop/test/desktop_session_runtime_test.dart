@@ -514,6 +514,61 @@ void main() {
         );
       },
     );
+
+    test(
+      'host-driven watch transitions persist without explicit mutations',
+      () async {
+        final persistedSessions = <Session>[];
+        final hostAdapter = _HostDrivenTransitionHostAdapter(
+          initialSession: _completedSession(),
+        );
+        final snapshotStore = _MemoryLegacySnapshotStore(
+          storedSession: _completedSession(),
+        );
+        final sessionStore = DurableLocalSessionStore.fromPersistenceComponents(
+          legacySnapshotStore: snapshotStore,
+          durableStorage: _MemoryDurableStorage(),
+        );
+        final bootstrapPort = CommonCodeSessionBootstrapPortAdapter(
+          sessionStore: sessionStore,
+          host: CommonCodeSessionBootstrapHost(
+            restoreSession: hostAdapter.restoreSession,
+            createSession: hostAdapter.createSession,
+            attachClient: hostAdapter.attachClient,
+          ),
+        );
+        final runtime = HostDesktopSessionRuntime(
+          hostService: hostAdapter as HostService,
+          bootstrapPort: bootstrapPort,
+          snapshotStore: snapshotStore,
+          persistSessionMutation: (session) {
+            persistedSessions.add(session);
+            sessionStore.createPersistenceContinuation(
+              attachedClientId: desktopSessionRuntimeAttachedClientId,
+              onError: (e, s) {},
+            )(session);
+          },
+        );
+        Session? snapshot;
+        runtime.bind(
+          onSnapshot: (session) => snapshot = session,
+          onWatchError: (error, stackTrace) {},
+        );
+
+        await runtime.initialize();
+
+        // Trigger a host-driven transition
+        hostAdapter.triggerHostTransition();
+
+        // Wait for the watch to emit
+        await Future<void>.delayed(const Duration(milliseconds: 50));
+
+        // Verify that persistence was called for the watch emission
+        expect(persistedSessions.length, greaterThanOrEqualTo(1));
+
+        await runtime.dispose();
+      },
+    );
   });
 }
 
@@ -832,6 +887,24 @@ final class _BootstrapPortHostService extends _TrackingHostService
     required String attachedClientId,
   }) async {
     throw StateError('legacy seed restore should not be used');
+  }
+}
+
+final class _HostDrivenTransitionHostAdapter extends _TrackingHostService {
+  _HostDrivenTransitionHostAdapter({required Session initialSession}) {
+    _sessions[initialSession.id] = initialSession;
+  }
+
+  void triggerHostTransition() {
+    final sessionId = _sessions.keys.first;
+    final currentSession = _sessions[sessionId]!;
+    final transitionedSession = currentSession.startTurn(
+      turnId: 'turn-host-1',
+      client: const Client(id: 'reviewer-client'),
+      submittedText: 'Host-driven transition',
+    );
+    _sessions[sessionId] = transitionedSession;
+    _controllers[sessionId]?.add(transitionedSession);
   }
 }
 
