@@ -3,11 +3,7 @@ import 'dart:async';
 import 'package:common_code_application/common_code_application.dart';
 import 'package:common_code_domain/common_code_domain.dart';
 import 'package:flutter/foundation.dart';
-import 'package:host_core/host_core.dart';
 
-import 'package:common_code_persistence/common_code_persistence.dart';
-
-import 'desktop_session_app_edge_composition.dart';
 import 'desktop_session_runtime.dart';
 
 final class DesktopSessionSnapshot {
@@ -88,19 +84,8 @@ final class DesktopSessionControllerState {
 class DesktopSessionController extends ChangeNotifier {
   DesktopSessionController({
     DesktopSessionRuntime? runtime,
-    HostService? hostService,
-    CommonCodeSessionBootstrapPort? bootstrapPort,
-    SessionSnapshotStore? snapshotStore,
-    void Function(Session session)? persistSessionMutation,
-  }) : _runtime =
-           runtime ??
-           createDesktopSessionRuntime(
-             hostService: hostService,
-             bootstrapPort: bootstrapPort,
-             snapshotStore: snapshotStore,
-             persistSessionMutation: persistSessionMutation,
-           ) {
-    _runtime.bind(
+  }) : _runtime = runtime {
+    _runtime?.bind(
       onSnapshot: _handleRuntimeSnapshot,
       onWatchError: _handleRuntimeWatchError,
     );
@@ -108,7 +93,7 @@ class DesktopSessionController extends ChangeNotifier {
 
   static const attachedClientId = desktopSessionRuntimeAttachedClientId;
 
-  final DesktopSessionRuntime _runtime;
+  final DesktopSessionRuntime? _runtime;
 
   DesktopSessionControllerState _state =
       const DesktopSessionControllerState.loading();
@@ -120,12 +105,12 @@ class DesktopSessionController extends ChangeNotifier {
 
   Future<void> initialize() async {
     _emitState(const DesktopSessionControllerState.loading());
-    await _runtime.initialize();
+    await _runtime?.initialize();
   }
 
   Future<void> refresh() async {
     _emitState(const DesktopSessionControllerState.loading());
-    await _runtime.refresh();
+    await _runtime?.refresh();
   }
 
   Future<void> acknowledgeNotification({required String notificationId}) async {
@@ -143,7 +128,7 @@ class DesktopSessionController extends ChangeNotifier {
     );
 
     try {
-      await _runtime.acknowledgeNotification(notificationId: notificationId);
+      await _runtime?.acknowledgeNotification(notificationId: notificationId);
       _isAcknowledgingNotification = false;
       final latestSnapshot = _state.snapshot ?? currentSnapshot;
       _emitState(
@@ -174,7 +159,7 @@ class DesktopSessionController extends ChangeNotifier {
     _emitState(_state.copyWithSubmitting(true));
 
     try {
-      await _runtime.submitTurn(submittedText: submittedText);
+      await _runtime?.submitTurn(submittedText: submittedText);
     } catch (error) {
       _emitState(
         DesktopSessionControllerState.error(
@@ -222,7 +207,7 @@ class DesktopSessionController extends ChangeNotifier {
   @override
   void dispose() {
     _isDisposed = true;
-    unawaited(_runtime.dispose());
+    unawaited(_runtime?.dispose());
     super.dispose();
   }
 }
