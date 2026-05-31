@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:common_code_application/common_code_application.dart';
+import 'package:common_code_desktop/src/desktop_session_app_edge_composition.dart';
 import 'package:common_code_desktop/src/desktop_session_runtime.dart';
 import 'package:common_code_domain/common_code_domain.dart';
 import 'package:common_code_observability/common_code_observability.dart';
@@ -384,6 +385,42 @@ void main() {
         await runtime.initialize();
 
         // Verify the runtime cached the non-default identity context from the app edge
+        expect(runtime.debugSessionContext, isNotNull);
+        expect(
+          runtime.debugSessionContext!.identity,
+          const Identity(id: nonDefaultIdentityId),
+        );
+        expect(
+          runtime.debugSessionContext!.attachedClientId,
+          nonDefaultClientId,
+        );
+      },
+    );
+
+    test(
+      'createDesktopSessionRuntime threads non-default app-edge identity through bootstrap to context',
+      () async {
+        const nonDefaultIdentityId = 'factory-test-identity';
+        const nonDefaultClientId = 'factory-test-client';
+        final hostService = _TrackingHostService();
+        final runtime = createDesktopSessionRuntime(
+          hostService: hostService,
+          snapshotStore: _MemoryLegacySnapshotStore(
+            storedSession: _completedSession(),
+          ),
+          desktopIdentityId: nonDefaultIdentityId,
+          attachedClientId: nonDefaultClientId,
+        );
+        runtime.bind(
+          onSnapshot: (session) {},
+          onWatchError: (error, stackTrace) {},
+        );
+
+        await runtime.initialize();
+
+        // Prove the factory-built runtime cached the non-default identity context
+        // from the app-edge-owned bootstrap request that flows through
+        // initialize/bootstrap/watch into the runtime context.
         expect(runtime.debugSessionContext, isNotNull);
         expect(
           runtime.debugSessionContext!.identity,
