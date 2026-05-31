@@ -1,18 +1,18 @@
 ---
 issue: github.com/cracklings3d/common-code#122
 title: Pass desktop identity context through Application-owned inputs instead of hardcoded runtime identity
-status: draft
-plan_status: proposed
-review_status: pending
+status: approved
+plan_status: approved
+review_status: passed
 source:
   - github.com/cracklings3d/common-code#122
   - controller-stage-c-brief
 owner: architect
 created_at: 2026-05-30
-updated_at: 2026-05-30
-approved_by: null
-approved_at: null
-review_artifact: null
+updated_at: 2026-05-31
+approved_by: desperate-gold-mite
+approved_at: 2026-05-29T00-00:00Z
+review_artifact: 'C:\Users\The_u\.opencode\projects\github-com-cracklings3d-common-code\runs\canonical-issue-resolver-parallel\2026-05-29T00-00-00Z-run-01\reviews\issue-122\loop-2-stage-D.json'
 related_branch: issue-122
 related_pr: null
 replaces: null
