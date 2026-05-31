@@ -249,6 +249,10 @@ final class HostDesktopSessionRuntime implements DesktopSessionRuntime {
             ? service as CommonCodeSessionBootstrapPort
             : null);
     if (bootstrapPort != null) {
+      // The app-edge-supplied bootstrapRequest is authoritative for the
+      // current desktop/in-memory path. Use it directly when available;
+      // the null-coalesce fallback exists only for direct constructor
+      // callers not going through the app-edge composition seam.
       final request = _bootstrapRequest ??
           CommonCodeSessionBootstrapRequest(
             defaultSessionId: _defaultSessionId,
@@ -274,12 +278,16 @@ final class HostDesktopSessionRuntime implements DesktopSessionRuntime {
         final restored = service.restoreSession(restoredSession);
         _persistSessionMutationForResolvedService()?.call(restored);
         _currentSessionId = restoredSession.id;
-        _currentBootstrapRequest = CommonCodeSessionBootstrapRequest(
-          defaultSessionId: _defaultSessionId,
-          hostId: _hostId,
-          attachedClientId: _attachedClientId,
-          desktopIdentity: Identity(id: _desktopIdentityId),
-        );
+        // Use the injected/request when available; the null-coalesce
+        // fallback exists only for direct constructor callers not going
+        // through the app-edge composition seam.
+        _currentBootstrapRequest = _bootstrapRequest ??
+            CommonCodeSessionBootstrapRequest(
+              defaultSessionId: _defaultSessionId,
+              hostId: _hostId,
+              attachedClientId: _attachedClientId,
+              desktopIdentity: Identity(id: _desktopIdentityId),
+            );
         _isBootstrapped = true;
         return;
       } catch (_) {
@@ -287,22 +295,28 @@ final class HostDesktopSessionRuntime implements DesktopSessionRuntime {
       }
     }
 
+    // Materialize the effective request once for use in fresh session path.
+    // Use the injected request when available; the null-coalesce fallback
+    // exists only for direct constructor callers not going through the
+    // app-edge composition seam.
+    final freshBootstrapRequest = _bootstrapRequest ??
+        CommonCodeSessionBootstrapRequest(
+          defaultSessionId: _defaultSessionId,
+          hostId: _hostId,
+          attachedClientId: _attachedClientId,
+          desktopIdentity: Identity(id: _desktopIdentityId),
+        );
     service.createSession(
-      sessionId: _defaultSessionId,
-      activeHost: Host(id: _hostId),
+      sessionId: freshBootstrapRequest.defaultSessionId,
+      activeHost: Host(id: freshBootstrapRequest.hostId),
     );
     final attachedSession = service.attachClient(
-      sessionId: _defaultSessionId,
-      client: Client(id: _attachedClientId),
+      sessionId: freshBootstrapRequest.defaultSessionId,
+      client: Client(id: freshBootstrapRequest.attachedClientId),
     );
     _persistSessionMutationForResolvedService()?.call(attachedSession);
-    _currentSessionId = _defaultSessionId;
-    _currentBootstrapRequest = CommonCodeSessionBootstrapRequest(
-      defaultSessionId: _defaultSessionId,
-      hostId: _hostId,
-      attachedClientId: _attachedClientId,
-      desktopIdentity: Identity(id: _desktopIdentityId),
-    );
+    _currentSessionId = freshBootstrapRequest.defaultSessionId;
+    _currentBootstrapRequest = freshBootstrapRequest;
     _isBootstrapped = true;
   }
 
