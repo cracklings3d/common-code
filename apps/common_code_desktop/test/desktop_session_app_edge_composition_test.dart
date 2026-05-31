@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:common_code_application/common_code_application.dart';
 import 'package:common_code_desktop/src/desktop_session_app_edge_composition.dart';
@@ -131,7 +132,8 @@ void main() {
 
         // Emit a fresh session with known acknowledged+unacknowledged notifications
         // through the watch stream. This is the non-vacuous baseline for AC2.
-        final streamedSnapshot = hostAdapter.emitStreamedSessionWithNotifications();
+        final streamedSnapshot = hostAdapter
+            .emitStreamedSessionWithNotifications();
         await sessionStore.waitForPendingPersistence();
 
         // Capture the initial payload after the streamed emission
@@ -154,8 +156,11 @@ void main() {
         // Prove a distinct durable write occurred from the watch path
         final payloadAfter = durableStorage.payload;
         expect(payloadAfter, isNotNull);
-        expect(payloadAfter, isNot(equals(initialPayload)),
-            reason: 'Watch path must trigger distinct write beyond initialize()');
+        expect(
+          payloadAfter,
+          isNot(equals(initialPayload)),
+          reason: 'Watch path must trigger distinct write beyond initialize()',
+        );
 
         // Verify the persisted state reflects the host-driven advancement
         final decoded = const SessionSnapshotCodec().decode(
@@ -168,15 +173,27 @@ void main() {
 
         // Verify notifications are preserved verbatim from the streamed path
         final decodedNotifications = decoded.notifications;
-        expect(decodedNotifications, isNotEmpty,
-            reason: 'Notifications must be preserved through watch persistence');
+        expect(
+          decodedNotifications,
+          isNotEmpty,
+          reason: 'Notifications must be preserved through watch persistence',
+        );
         for (final notification in decodedNotifications) {
-          expect(notification.id, isNotEmpty,
-              reason: 'Notification id must be deterministic and preserved');
-          expect(notification.turnId, isNotEmpty,
-              reason: 'Notification turnId must be preserved');
-          expect(notification.transition, isNotNull,
-              reason: 'Notification transition must be preserved');
+          expect(
+            notification.id,
+            isNotEmpty,
+            reason: 'Notification id must be deterministic and preserved',
+          );
+          expect(
+            notification.turnId,
+            isNotEmpty,
+            reason: 'Notification turnId must be preserved',
+          );
+          expect(
+            notification.transition,
+            isNotNull,
+            reason: 'Notification transition must be preserved',
+          );
           // isAcknowledged flag must be verbatim from the streamed snapshot
         }
 
@@ -188,12 +205,22 @@ void main() {
               'Notification ${initial.id} not found after persistence',
             ),
           );
-          expect(persisted.isAcknowledged, initial.isAcknowledged,
-              reason: 'Notification ${initial.id} isAcknowledged must be preserved');
-          expect(persisted.turnId, initial.turnId,
-              reason: 'Notification ${initial.id} turnId must be preserved');
-          expect(persisted.transition, initial.transition,
-              reason: 'Notification ${initial.id} transition must be preserved');
+          expect(
+            persisted.isAcknowledged,
+            initial.isAcknowledged,
+            reason:
+                'Notification ${initial.id} isAcknowledged must be preserved',
+          );
+          expect(
+            persisted.turnId,
+            initial.turnId,
+            reason: 'Notification ${initial.id} turnId must be preserved',
+          );
+          expect(
+            persisted.transition,
+            initial.transition,
+            reason: 'Notification ${initial.id} transition must be preserved',
+          );
         }
 
         await facade.dispose();
@@ -205,8 +232,7 @@ void main() {
       () async {
         const nonDefaultIdentityId = 'test-facade-identity';
         const nonDefaultClientId = 'test-facade-client';
-        final capturedRequests =
-            <CommonCodeSessionBootstrapRequest>[];
+        final capturedRequests = <CommonCodeSessionBootstrapRequest>[];
 
         final hostAdapter = _CapturingBootstrapHostAdapter(
           onCreateFreshSession: (request) {
@@ -230,12 +256,93 @@ void main() {
           capturedRequests.first.desktopIdentity,
           const Identity(id: nonDefaultIdentityId),
         );
-        expect(
-          capturedRequests.first.attachedClientId,
-          nonDefaultClientId,
-        );
+        expect(capturedRequests.first.attachedClientId, nonDefaultClientId);
 
         await facade.dispose();
+      },
+    );
+
+    test(
+      'source-structure regression guard: default facade path uses host_in_memory package types',
+      () async {
+        // Find source files relative to the test file location
+        // Platform.script can point to a cached location, so we use testDir
+        // which is the directory containing the running test script
+        final testScript = File(Platform.script.toFilePath());
+        final testDir = testScript.parent;
+        // testDir appears to be apps/common_code_desktop/ (not apps/common_code_desktop/test/)
+        // so lib/src is a direct child
+        final libSrcDirUri = testDir.uri.resolve('lib/src/');
+        final compositionSrcFile = File.fromUri(
+          libSrcDirUri.resolve('desktop_session_app_edge_composition.dart'),
+        );
+        final facadeAdaptersSrcFile = File.fromUri(
+          libSrcDirUri.resolve('desktop_session_facade_adapters.dart'),
+        );
+
+        final compositionContent = await compositionSrcFile.readAsString();
+        final facadeAdaptersContent = await facadeAdaptersSrcFile
+            .readAsString();
+
+        // Assert the default facade path imports the host_in_memory package
+        expect(
+          compositionContent,
+          contains("import 'package:host_in_memory/host_in_memory.dart'"),
+          reason:
+              'desktop_session_app_edge_composition.dart must import '
+              'package:host_in_memory/host_in_memory.dart to use the '
+              'Application-owned in-memory gateway and observation types.',
+        );
+
+        // Assert the default facade path composes the required types
+        expect(
+          compositionContent,
+          contains('PersistingHostServiceSessionMutations'),
+          reason:
+              'default facade must compose PersistingHostServiceSessionMutations '
+              'from the host_in_memory package.',
+        );
+        expect(
+          compositionContent,
+          contains('PersistingHostServiceSessionObservation'),
+          reason:
+              'default facade must compose PersistingHostServiceSessionObservation '
+              'from the host_in_memory package.',
+        );
+        expect(
+          compositionContent,
+          contains('HostServiceSessionObservation'),
+          reason:
+              'default facade must compose HostServiceSessionObservation '
+              'from the host_in_memory package.',
+        );
+
+        // Assert desktop_session_facade_adapters.dart has NOT regained those types
+        // (ownership boundary regression guard)
+        expect(
+          facadeAdaptersContent,
+          isNot(contains('PersistingHostServiceSessionMutations')),
+          reason:
+              'desktop_session_facade_adapters.dart must not define '
+              'PersistingHostServiceSessionMutations - that type belongs to '
+              'the host_in_memory package.',
+        );
+        expect(
+          facadeAdaptersContent,
+          isNot(contains('PersistingHostServiceSessionObservation')),
+          reason:
+              'desktop_session_facade_adapters.dart must not define '
+              'PersistingHostServiceSessionObservation - that type belongs to '
+              'the host_in_memory package.',
+        );
+        expect(
+          facadeAdaptersContent,
+          isNot(contains('HostServiceSessionObservation')),
+          reason:
+              'desktop_session_facade_adapters.dart must not define '
+              'HostServiceSessionObservation - that type belongs to '
+              'the host_in_memory package.',
+        );
       },
     );
   });
@@ -566,7 +673,8 @@ final class _MultiEmittingInMemoryHostAdapter implements HostService {
     required String submittedText,
   }) {
     final session = _sessions[sessionId]!;
-    final turnNumber = session.promptThread.turns
+    final turnNumber =
+        session.promptThread.turns
             .where((t) => t.clientId == client.id)
             .length +
         1;
@@ -609,11 +717,11 @@ final class _MultiEmittingInMemoryHostAdapter implements HostService {
 final class _CapturingBootstrapHostAdapter implements HostService {
   _CapturingBootstrapHostAdapter({
     required void Function(CommonCodeSessionBootstrapRequest request)
-        onCreateFreshSession,
+    onCreateFreshSession,
   }) : _onCreateFreshSession = onCreateFreshSession;
 
   final void Function(CommonCodeSessionBootstrapRequest request)
-      _onCreateFreshSession;
+  _onCreateFreshSession;
 
   final Map<String, Session> _sessions = <String, Session>{};
 
@@ -655,7 +763,8 @@ final class _CapturingBootstrapHostAdapter implements HostService {
     required String submittedText,
   }) {
     final session = _sessions[sessionId]!;
-    final turnNumber = session.promptThread.turns
+    final turnNumber =
+        session.promptThread.turns
             .where((t) => t.clientId == client.id)
             .length +
         1;
@@ -678,13 +787,15 @@ final class _CapturingBootstrapHostAdapter implements HostService {
 /// for test verification.
 final class _CapturingBootstrapPortAdapter
     implements CommonCodeSessionBootstrapPort {
-  _CapturingBootstrapPortAdapter({required _CapturingBootstrapHostAdapter hostAdapter})
-      : _hostAdapter = hostAdapter;
+  _CapturingBootstrapPortAdapter({
+    required _CapturingBootstrapHostAdapter hostAdapter,
+  }) : _hostAdapter = hostAdapter;
 
   final _CapturingBootstrapHostAdapter _hostAdapter;
 
   @override
-  CommonCodeSessionStore get sessionStore => _CapturingBootstrapSessionStore(this);
+  CommonCodeSessionStore get sessionStore =>
+      _CapturingBootstrapSessionStore(this);
 
   @override
   Future<CommonCodeDurableBootstrapLoadResult> loadDurableSessionCandidate({
@@ -714,7 +825,9 @@ final class _CapturingBootstrapPortAdapter
   }
 
   @override
-  Future<Session> createFreshSession(CommonCodeSessionBootstrapRequest request) async {
+  Future<Session> createFreshSession(
+    CommonCodeSessionBootstrapRequest request,
+  ) async {
     _hostAdapter._onCreateFreshSession(request);
     final createdSession = _hostAdapter.createSession(
       sessionId: request.defaultSessionId,
@@ -745,9 +858,7 @@ final class _CapturingBootstrapSessionStore implements CommonCodeSessionStore {
   Future<CommonCodeLegacySeedLoadResult> loadLegacySeedSession({
     required String attachedClientId,
   }) async {
-    return _port.loadLegacySeedSession(
-      attachedClientId: attachedClientId,
-    );
+    return _port.loadLegacySeedSession(attachedClientId: attachedClientId);
   }
 
   @override
