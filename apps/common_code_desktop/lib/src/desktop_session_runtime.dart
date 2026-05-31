@@ -55,6 +55,7 @@ final class HostDesktopSessionRuntime implements DesktopSessionRuntime {
     String defaultSessionId = desktopSessionRuntimeDefaultSessionId,
     String hostId = desktopSessionRuntimeHostId,
     String attachedClientId = desktopSessionRuntimeAttachedClientId,
+    String desktopIdentityId = desktopSessionRuntimeIdentityId,
   }) : _hostService = hostService,
        _bootstrapPort = bootstrapPort,
        _legacySnapshotStore =
@@ -62,7 +63,8 @@ final class HostDesktopSessionRuntime implements DesktopSessionRuntime {
        _persistSessionMutation = persistSessionMutation,
        _defaultSessionId = defaultSessionId,
        _hostId = hostId,
-       _attachedClientId = attachedClientId;
+       _attachedClientId = attachedClientId,
+       _desktopIdentityId = desktopIdentityId;
 
   final HostService? _hostService;
   final CommonCodeSessionBootstrapPort? _bootstrapPort;
@@ -71,6 +73,7 @@ final class HostDesktopSessionRuntime implements DesktopSessionRuntime {
   final String _defaultSessionId;
   final String _hostId;
   final String _attachedClientId;
+  final String _desktopIdentityId;
 
   void Function(Session session)? _onSnapshot;
   void Function(Object error, StackTrace stackTrace)? _onWatchError;
@@ -83,6 +86,7 @@ final class HostDesktopSessionRuntime implements DesktopSessionRuntime {
   bool _isDisposed = false;
   String? _currentSessionId;
   _RuntimeSessionContext? _currentSessionContext;
+  CommonCodeSessionBootstrapRequest? _currentBootstrapRequest;
   int _watchGeneration = 0;
   final CommonCodeSessionBootstrapLifecycle _bootstrapLifecycle =
       CommonCodeSessionBootstrapLifecycle();
@@ -223,7 +227,7 @@ final class HostDesktopSessionRuntime implements DesktopSessionRuntime {
 
     final context = _RuntimeSessionContext(
       sessionId: _currentSessionId!,
-      identity: const Identity(id: desktopSessionRuntimeIdentityId),
+      identity: _currentBootstrapRequest!.desktopIdentity,
       attachedClientId: _attachedClientId,
     );
     _currentSessionContext = context;
@@ -242,15 +246,18 @@ final class HostDesktopSessionRuntime implements DesktopSessionRuntime {
             ? service as CommonCodeSessionBootstrapPort
             : null);
     if (bootstrapPort != null) {
+      final request = CommonCodeSessionBootstrapRequest(
+        defaultSessionId: _defaultSessionId,
+        hostId: _hostId,
+        attachedClientId: _attachedClientId,
+        desktopIdentity: Identity(id: _desktopIdentityId),
+      );
       final bootstrappedSession = await _bootstrapLifecycle.bootstrap(
-        request: CommonCodeSessionBootstrapRequest(
-          defaultSessionId: _defaultSessionId,
-          hostId: _hostId,
-          attachedClientId: _attachedClientId,
-        ),
+        request: request,
         port: bootstrapPort,
       );
       _currentSessionId = bootstrappedSession.id;
+      _currentBootstrapRequest = request;
       _isBootstrapped = true;
       return;
     }
@@ -263,6 +270,12 @@ final class HostDesktopSessionRuntime implements DesktopSessionRuntime {
         final restored = service.restoreSession(restoredSession);
         _persistSessionMutationForResolvedService()?.call(restored);
         _currentSessionId = restoredSession.id;
+        _currentBootstrapRequest = CommonCodeSessionBootstrapRequest(
+          defaultSessionId: _defaultSessionId,
+          hostId: _hostId,
+          attachedClientId: _attachedClientId,
+          desktopIdentity: Identity(id: _desktopIdentityId),
+        );
         _isBootstrapped = true;
         return;
       } catch (_) {
@@ -280,6 +293,12 @@ final class HostDesktopSessionRuntime implements DesktopSessionRuntime {
     );
     _persistSessionMutationForResolvedService()?.call(attachedSession);
     _currentSessionId = _defaultSessionId;
+    _currentBootstrapRequest = CommonCodeSessionBootstrapRequest(
+      defaultSessionId: _defaultSessionId,
+      hostId: _hostId,
+      attachedClientId: _attachedClientId,
+      desktopIdentity: Identity(id: _desktopIdentityId),
+    );
     _isBootstrapped = true;
   }
 

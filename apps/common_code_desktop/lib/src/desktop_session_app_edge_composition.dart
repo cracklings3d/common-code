@@ -23,6 +23,7 @@ CommonCodeSessionFacade createDesktopSessionFacade({
   Object? diagnosticsSink,
   String defaultSessionId = desktopSessionRuntimeDefaultSessionId,
   String hostId = desktopSessionRuntimeHostId,
+  String desktopIdentityId = desktopSessionRuntimeIdentityId,
 }) {
   final diagnosticsPort = resolveDurableLocalHostDiagnosticsPort(
     diagnosticsSink,
@@ -97,6 +98,7 @@ CommonCodeSessionFacade createDesktopSessionFacade({
       defaultSessionId: defaultSessionId,
       hostId: hostId,
       attachedClientId: attachedClientId,
+      desktopIdentityId: desktopIdentityId,
     );
     effectiveGateway = hostGateway ?? sessionMutations;
   }
@@ -119,6 +121,7 @@ HostDesktopSessionRuntime createDesktopSessionRuntime({
   String defaultSessionId = desktopSessionRuntimeDefaultSessionId,
   String hostId = desktopSessionRuntimeHostId,
   String attachedClientId = desktopSessionRuntimeAttachedClientId,
+  String desktopIdentityId = desktopSessionRuntimeIdentityId,
 }) {
   final effectiveSnapshotStore =
       snapshotStore ?? SharedPreferencesSessionSnapshotStore();
@@ -157,5 +160,6 @@ HostDesktopSessionRuntime createDesktopSessionRuntime({
     defaultSessionId: defaultSessionId,
     hostId: hostId,
     attachedClientId: attachedClientId,
+    desktopIdentityId: desktopIdentityId,
   );
 }

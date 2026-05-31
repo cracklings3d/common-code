@@ -272,6 +272,7 @@ void main() {
           sessionStore,
           attachedClientId: desktopSessionRuntimeAttachedClientId,
         ),
+        desktopIdentityId: desktopSessionRuntimeIdentityId,
       );
       Session? snapshot;
       runtime.bind(
@@ -299,6 +300,7 @@ void main() {
         final runtime = HostDesktopSessionRuntime(
           hostService: hostService,
           snapshotStore: _FailingLegacySnapshotStore(),
+          desktopIdentityId: desktopSessionRuntimeIdentityId,
         );
         Session? snapshot;
         runtime.bind(
@@ -343,6 +345,7 @@ void main() {
           snapshotStore: _MemoryLegacySnapshotStore(
             storedSession: _completedSession(),
           ),
+          desktopIdentityId: desktopSessionRuntimeIdentityId,
         );
         runtime.bind(
           onSnapshot: (session) {},
