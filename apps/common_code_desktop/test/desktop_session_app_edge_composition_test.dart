@@ -199,6 +199,45 @@ void main() {
         await facade.dispose();
       },
     );
+
+    test(
+      'facade threads non-default desktopIdentityId and attachedClientId from app edge',
+      () async {
+        const nonDefaultIdentityId = 'test-facade-identity';
+        const nonDefaultClientId = 'test-facade-client';
+        final capturedRequests =
+            <CommonCodeSessionBootstrapRequest>[];
+
+        final hostAdapter = _CapturingBootstrapHostAdapter(
+          onCreateFreshSession: (request) {
+            capturedRequests.add(request);
+          },
+        );
+        final facade = createDesktopSessionFacade(
+          hostService: hostAdapter as HostService,
+          bootstrapPort: _CapturingBootstrapPortAdapter(
+            hostAdapter: hostAdapter,
+          ),
+          attachedClientId: nonDefaultClientId,
+          desktopIdentityId: nonDefaultIdentityId,
+        );
+
+        await facade.initialize();
+
+        // Verify the facade threaded the non-default values through to the bootstrap request
+        expect(capturedRequests, hasLength(1));
+        expect(
+          capturedRequests.first.desktopIdentity,
+          const Identity(id: nonDefaultIdentityId),
+        );
+        expect(
+          capturedRequests.first.attachedClientId,
+          nonDefaultClientId,
+        );
+
+        await facade.dispose();
+      },
+    );
   });
 }
 
@@ -563,4 +602,166 @@ final class _MultiEmittingInMemoryHostAdapter implements HostService {
     );
     return controller.stream;
   }
+}
+
+/// A [HostService] that captures [CommonCodeSessionBootstrapRequest] values
+/// passed during session creation for test verification.
+final class _CapturingBootstrapHostAdapter implements HostService {
+  _CapturingBootstrapHostAdapter({
+    required void Function(CommonCodeSessionBootstrapRequest request)
+        onCreateFreshSession,
+  }) : _onCreateFreshSession = onCreateFreshSession;
+
+  final void Function(CommonCodeSessionBootstrapRequest request)
+      _onCreateFreshSession;
+
+  final Map<String, Session> _sessions = <String, Session>{};
+
+  @override
+  Session acknowledgeNotification({
+    required String sessionId,
+    required String notificationId,
+  }) {
+    return _sessions[sessionId]!;
+  }
+
+  @override
+  Session attachClient({required String sessionId, required Client client}) {
+    return _sessions[sessionId]!.attachClient(client);
+  }
+
+  @override
+  Session createSession({required String sessionId, required Host activeHost}) {
+    final session = Session(id: sessionId, activeHost: activeHost);
+    _sessions[sessionId] = session;
+    return session;
+  }
+
+  @override
+  Session readSession(String sessionId) {
+    return _sessions[sessionId]!;
+  }
+
+  @override
+  Session restoreSession(Session session) {
+    _sessions[session.id] = session;
+    return session;
+  }
+
+  @override
+  Session submitTurn({
+    required String sessionId,
+    required Client client,
+    required String submittedText,
+  }) {
+    final session = _sessions[sessionId]!;
+    final turnNumber = session.promptThread.turns
+            .where((t) => t.clientId == client.id)
+            .length +
+        1;
+    final updated = session.startTurn(
+      turnId: 'turn-$turnNumber',
+      client: client,
+      submittedText: submittedText,
+    );
+    _sessions[sessionId] = updated;
+    return updated;
+  }
+
+  @override
+  Stream<Session> watchSession(String sessionId) {
+    return Stream<Session>.value(_sessions[sessionId]!);
+  }
+}
+
+/// A [CommonCodeSessionBootstrapPort] that captures the bootstrap request
+/// for test verification.
+final class _CapturingBootstrapPortAdapter
+    implements CommonCodeSessionBootstrapPort {
+  _CapturingBootstrapPortAdapter({required _CapturingBootstrapHostAdapter hostAdapter})
+      : _hostAdapter = hostAdapter;
+
+  final _CapturingBootstrapHostAdapter _hostAdapter;
+
+  @override
+  CommonCodeSessionStore get sessionStore => _CapturingBootstrapSessionStore(this);
+
+  @override
+  Future<CommonCodeDurableBootstrapLoadResult> loadDurableSessionCandidate({
+    required String attachedClientId,
+  }) async {
+    return CommonCodeDurableBootstrapLoadResult.missing();
+  }
+
+  @override
+  Future<CommonCodeLegacySeedLoadResult> loadLegacySeedSession({
+    required String attachedClientId,
+  }) async {
+    return const CommonCodeLegacySeedLoadResult.missing();
+  }
+
+  @override
+  Session restoreDurableSession(Session session) {
+    return session;
+  }
+
+  @override
+  Future<Session> restoreLegacySeededSession({
+    required Session session,
+    required String attachedClientId,
+  }) async {
+    return session;
+  }
+
+  @override
+  Future<Session> createFreshSession(CommonCodeSessionBootstrapRequest request) async {
+    _hostAdapter._onCreateFreshSession(request);
+    final createdSession = _hostAdapter.createSession(
+      sessionId: request.defaultSessionId,
+      activeHost: Host(id: request.hostId),
+    );
+    return _hostAdapter.attachClient(
+      sessionId: createdSession.id,
+      client: Client(id: request.attachedClientId),
+    );
+  }
+}
+
+final class _CapturingBootstrapSessionStore implements CommonCodeSessionStore {
+  const _CapturingBootstrapSessionStore(this._port);
+
+  final _CapturingBootstrapPortAdapter _port;
+
+  @override
+  Future<CommonCodeDurableBootstrapLoadResult> loadDurableSessionCandidate({
+    required String attachedClientId,
+  }) async {
+    return _port.loadDurableSessionCandidate(
+      attachedClientId: attachedClientId,
+    );
+  }
+
+  @override
+  Future<CommonCodeLegacySeedLoadResult> loadLegacySeedSession({
+    required String attachedClientId,
+  }) async {
+    return _port.loadLegacySeedSession(
+      attachedClientId: attachedClientId,
+    );
+  }
+
+  @override
+  Future<void> persistSession(
+    Session session, {
+    String? attachedClientId,
+  }) async {}
+
+  @override
+  Future<void> queueSessionPersistence(
+    Session session, {
+    String? attachedClientId,
+  }) async {}
+
+  @override
+  Future<void> waitForPendingPersistence() async {}
 }

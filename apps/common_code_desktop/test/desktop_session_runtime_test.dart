@@ -363,6 +363,40 @@ void main() {
     );
 
     test(
+      'runtime threads non-default desktopIdentityId and attachedClientId from app edge',
+      () async {
+        const nonDefaultIdentityId = 'test-custom-identity';
+        const nonDefaultClientId = 'test-custom-client';
+        final hostService = _TrackingHostService();
+        final runtime = HostDesktopSessionRuntime(
+          hostService: hostService,
+          snapshotStore: _MemoryLegacySnapshotStore(
+            storedSession: _completedSession(),
+          ),
+          desktopIdentityId: nonDefaultIdentityId,
+          attachedClientId: nonDefaultClientId,
+        );
+        runtime.bind(
+          onSnapshot: (session) {},
+          onWatchError: (error, stackTrace) {},
+        );
+
+        await runtime.initialize();
+
+        // Verify the runtime cached the non-default identity context from the app edge
+        expect(runtime.debugSessionContext, isNotNull);
+        expect(
+          runtime.debugSessionContext!.identity,
+          const Identity(id: nonDefaultIdentityId),
+        );
+        expect(
+          runtime.debugSessionContext!.attachedClientId,
+          nonDefaultClientId,
+        );
+      },
+    );
+
+    test(
       'submit reuses the cached session context from watch bootstrap',
       () async {
         final hostService = _TrackingHostService();
