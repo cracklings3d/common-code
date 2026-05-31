@@ -59,7 +59,7 @@ CommonCodeSessionFacade createDesktopSessionFacade({
   final CommonCodeSessionDriver effectiveDriver;
   final CommonCodeSessionObservation effectiveObservation;
   final HostGateway effectiveGateway;
-  final sessionMutations = PersistingHostServiceSessionMutations(
+  final sessionGateway = PersistingHostServiceSessionMutations(
     hostService: effectiveHostService,
     persistSessionMutation: effectivePersistSessionMutation,
   );
@@ -93,7 +93,10 @@ CommonCodeSessionFacade createDesktopSessionFacade({
         );
     effectiveDriver = DesktopSessionBootstrapDriver(
       bootstrapPort: effectiveBootstrapPort,
-      mutationPort: sessionMutations,
+      mutationPort: HostGatewayDesktopSessionMutationPort(
+        hostGateway: sessionGateway,
+        hostService: effectiveHostService,
+      ),
       observation: effectiveObservation,
       defaultSessionId: defaultSessionId,
       hostId: hostId,
@@ -106,7 +109,7 @@ CommonCodeSessionFacade createDesktopSessionFacade({
         desktopIdentity: Identity(id: desktopIdentityId),
       ),
     );
-    effectiveGateway = hostGateway ?? sessionMutations;
+    effectiveGateway = hostGateway ?? sessionGateway;
   }
 
   return CommonCodeSessionFacade(
