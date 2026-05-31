@@ -271,7 +271,7 @@ final class CommonCodeSessionBootstrapRequest {
     required this.defaultSessionId,
     required this.hostId,
     required this.attachedClientId,
-    required this.desktopIdentity,
+    this.desktopIdentity = const Identity(id: 'desktop-app-edge-default'),
   });
 
   final String defaultSessionId;

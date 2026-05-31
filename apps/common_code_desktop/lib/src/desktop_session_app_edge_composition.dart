@@ -99,6 +99,12 @@ CommonCodeSessionFacade createDesktopSessionFacade({
       hostId: hostId,
       attachedClientId: attachedClientId,
       desktopIdentityId: desktopIdentityId,
+      bootstrapRequest: CommonCodeSessionBootstrapRequest(
+        defaultSessionId: defaultSessionId,
+        hostId: hostId,
+        attachedClientId: attachedClientId,
+        desktopIdentity: Identity(id: desktopIdentityId),
+      ),
     );
     effectiveGateway = hostGateway ?? sessionMutations;
   }
@@ -152,6 +158,13 @@ HostDesktopSessionRuntime createDesktopSessionRuntime({
         onError: createDurableWriteFailureReporter(diagnosticsPort),
       );
 
+  final bootstrapRequest = CommonCodeSessionBootstrapRequest(
+    defaultSessionId: defaultSessionId,
+    hostId: hostId,
+    attachedClientId: attachedClientId,
+    desktopIdentity: Identity(id: desktopIdentityId),
+  );
+
   return HostDesktopSessionRuntime(
     hostService: effectiveHostService,
     bootstrapPort: effectiveBootstrapPort,
@@ -161,5 +174,6 @@ HostDesktopSessionRuntime createDesktopSessionRuntime({
     hostId: hostId,
     attachedClientId: attachedClientId,
     desktopIdentityId: desktopIdentityId,
+    bootstrapRequest: bootstrapRequest,
   );
 }
