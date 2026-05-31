@@ -104,60 +104,30 @@ final class DesktopSessionBootstrapDriver implements CommonCodeSessionDriver {
   }
 }
 
-final class HostServiceSessionObservation
-    implements CommonCodeSessionObservation {
-  const HostServiceSessionObservation(this._hostService);
-
-  final HostService _hostService;
-
-  @override
-  Stream<Session> watchSession(String sessionId) {
-    return _hostService.watchSession(sessionId);
-  }
-}
-
-final class PersistingHostServiceSessionObservation
-    implements CommonCodeSessionObservation {
-  const PersistingHostServiceSessionObservation({
-    required CommonCodeSessionObservation observation,
-    required void Function(Session session)? persistSessionMutation,
-  }) : _observation = observation,
-       _persistSessionMutation = persistSessionMutation;
-
-  final CommonCodeSessionObservation _observation;
-  final void Function(Session session)? _persistSessionMutation;
-
-  @override
-  Stream<Session> watchSession(String sessionId) {
-    final baseStream = _observation.watchSession(sessionId);
-    return baseStream.map((session) {
-      _persistSessionMutation?.call(session);
-      return session;
-    });
-  }
-}
-
-final class PersistingHostServiceSessionMutations
-    implements DesktopSessionMutationPort, HostGateway {
-  const PersistingHostServiceSessionMutations({
+/// Thin delegation bridge that adapts [HostGateway] and [HostService] to [DesktopSessionMutationPort].
+///
+/// This bridge translates the desktop-local mutation protocol onto the application
+/// [HostGateway] interface. The [HostService] is needed because [HostGateway] does not
+/// expose the acknowledgeNotification method.
+final class HostGatewayDesktopSessionMutationPort implements DesktopSessionMutationPort {
+  const HostGatewayDesktopSessionMutationPort({
+    required HostGateway hostGateway,
     required HostService hostService,
-    required void Function(Session session)? persistSessionMutation,
-  }) : _hostService = hostService,
-       _persistSessionMutation = persistSessionMutation;
+  }) : _hostGateway = hostGateway,
+       _hostService = hostService;
 
+  final HostGateway _hostGateway;
   final HostService _hostService;
-  final void Function(Session session)? _persistSessionMutation;
 
   @override
   Future<void> acknowledgeNotification({
     required String sessionId,
     required String notificationId,
   }) async {
-    final session = _hostService.acknowledgeNotification(
+    _hostService.acknowledgeNotification(
       sessionId: sessionId,
       notificationId: notificationId,
     );
-    _persistSessionMutation?.call(session);
   }
 
   @override
@@ -166,24 +136,10 @@ final class PersistingHostServiceSessionMutations
     required String attachedClientId,
     required String submittedText,
   }) {
-    return submitTurn(
+    return _hostGateway.submitTurn(
       sessionId: sessionId,
       client: Client(id: attachedClientId),
       submittedText: submittedText,
     );
-  }
-
-  @override
-  Future<void> submitTurn({
-    required String sessionId,
-    required Client client,
-    required String submittedText,
-  }) async {
-    final session = _hostService.submitTurn(
-      sessionId: sessionId,
-      client: client,
-      submittedText: submittedText,
-    );
-    _persistSessionMutation?.call(session);
   }
 }
