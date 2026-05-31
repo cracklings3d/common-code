@@ -27,13 +27,15 @@ final class DesktopSessionBootstrapDriver implements CommonCodeSessionDriver {
     required String hostId,
     required String attachedClientId,
     String desktopIdentityId = desktopSessionRuntimeIdentityId,
+    CommonCodeSessionBootstrapRequest? bootstrapRequest,
   }) : _bootstrapPort = bootstrapPort,
        _mutationPort = mutationPort,
        _observation = observation,
        _defaultSessionId = defaultSessionId,
        _hostId = hostId,
        _attachedClientId = attachedClientId,
-       _desktopIdentityId = desktopIdentityId;
+       _desktopIdentityId = desktopIdentityId,
+       _bootstrapRequest = bootstrapRequest;
 
   final CommonCodeSessionBootstrapPort _bootstrapPort;
   final DesktopSessionMutationPort _mutationPort;
@@ -42,6 +44,7 @@ final class DesktopSessionBootstrapDriver implements CommonCodeSessionDriver {
   final String _hostId;
   final String _attachedClientId;
   final String _desktopIdentityId;
+  final CommonCodeSessionBootstrapRequest? _bootstrapRequest;
 
   String? _currentSessionId;
   CommonCodeSessionBootstrapRequest? _currentBootstrapRequest;
@@ -55,12 +58,13 @@ final class DesktopSessionBootstrapDriver implements CommonCodeSessionDriver {
       return CommonCodeSessionBinding.attached(sessionId: currentSessionId);
     }
 
-    final request = CommonCodeSessionBootstrapRequest(
-      defaultSessionId: _defaultSessionId,
-      hostId: _hostId,
-      attachedClientId: _attachedClientId,
-      desktopIdentity: Identity(id: _desktopIdentityId),
-    );
+    final request = _bootstrapRequest ??
+        CommonCodeSessionBootstrapRequest(
+          defaultSessionId: _defaultSessionId,
+          hostId: _hostId,
+          attachedClientId: _attachedClientId,
+          desktopIdentity: Identity(id: _desktopIdentityId),
+        );
     final bootstrappedSession = await _bootstrapLifecycle.bootstrap(
       request: request,
       port: _bootstrapPort,

@@ -56,6 +56,7 @@ final class HostDesktopSessionRuntime implements DesktopSessionRuntime {
     String hostId = desktopSessionRuntimeHostId,
     String attachedClientId = desktopSessionRuntimeAttachedClientId,
     String desktopIdentityId = desktopSessionRuntimeIdentityId,
+    CommonCodeSessionBootstrapRequest? bootstrapRequest,
   }) : _hostService = hostService,
        _bootstrapPort = bootstrapPort,
        _legacySnapshotStore =
@@ -64,7 +65,8 @@ final class HostDesktopSessionRuntime implements DesktopSessionRuntime {
        _defaultSessionId = defaultSessionId,
        _hostId = hostId,
        _attachedClientId = attachedClientId,
-       _desktopIdentityId = desktopIdentityId;
+       _desktopIdentityId = desktopIdentityId,
+       _bootstrapRequest = bootstrapRequest;
 
   final HostService? _hostService;
   final CommonCodeSessionBootstrapPort? _bootstrapPort;
@@ -74,6 +76,7 @@ final class HostDesktopSessionRuntime implements DesktopSessionRuntime {
   final String _hostId;
   final String _attachedClientId;
   final String _desktopIdentityId;
+  final CommonCodeSessionBootstrapRequest? _bootstrapRequest;
 
   void Function(Session session)? _onSnapshot;
   void Function(Object error, StackTrace stackTrace)? _onWatchError;
@@ -228,7 +231,7 @@ final class HostDesktopSessionRuntime implements DesktopSessionRuntime {
     final context = _RuntimeSessionContext(
       sessionId: _currentSessionId!,
       identity: _currentBootstrapRequest!.desktopIdentity,
-      attachedClientId: _attachedClientId,
+      attachedClientId: _currentBootstrapRequest!.attachedClientId,
     );
     _currentSessionContext = context;
     return context;
@@ -246,12 +249,13 @@ final class HostDesktopSessionRuntime implements DesktopSessionRuntime {
             ? service as CommonCodeSessionBootstrapPort
             : null);
     if (bootstrapPort != null) {
-      final request = CommonCodeSessionBootstrapRequest(
-        defaultSessionId: _defaultSessionId,
-        hostId: _hostId,
-        attachedClientId: _attachedClientId,
-        desktopIdentity: Identity(id: _desktopIdentityId),
-      );
+      final request = _bootstrapRequest ??
+          CommonCodeSessionBootstrapRequest(
+            defaultSessionId: _defaultSessionId,
+            hostId: _hostId,
+            attachedClientId: _attachedClientId,
+            desktopIdentity: Identity(id: _desktopIdentityId),
+          );
       final bootstrappedSession = await _bootstrapLifecycle.bootstrap(
         request: request,
         port: bootstrapPort,
