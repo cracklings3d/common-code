@@ -58,6 +58,10 @@ final class DesktopSessionBootstrapDriver implements CommonCodeSessionDriver {
       return CommonCodeSessionBinding.attached(sessionId: currentSessionId);
     }
 
+    // The app-edge-supplied bootstrapRequest is authoritative for the
+    // current desktop/in-memory path. Use it directly when available;
+    // the null-coalesce fallback exists only for direct constructor
+    // callers not going through the app-edge composition seam.
     final request = _bootstrapRequest ??
         CommonCodeSessionBootstrapRequest(
           defaultSessionId: _defaultSessionId,
