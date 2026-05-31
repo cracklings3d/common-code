@@ -1,6 +1,7 @@
 import 'package:common_code_domain/common_code_domain.dart';
 import 'package:flutter/material.dart';
 
+import 'src/desktop_session_app_edge_composition.dart';
 import 'src/desktop_session_controller.dart';
 
 void main() {
@@ -9,7 +10,9 @@ void main() {
 
 class CommonCodeDesktopApp extends StatelessWidget {
   CommonCodeDesktopApp({super.key, DesktopSessionController? sessionController})
-    : sessionController = sessionController ?? DesktopSessionController(),
+    : sessionController = sessionController ?? DesktopSessionController(
+        runtime: createDesktopSessionRuntime(),
+      ),
       _ownsSessionController = sessionController == null;
 
   final DesktopSessionController sessionController;
