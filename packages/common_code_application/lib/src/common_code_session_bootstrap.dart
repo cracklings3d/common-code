@@ -271,11 +271,13 @@ final class CommonCodeSessionBootstrapRequest {
     required this.defaultSessionId,
     required this.hostId,
     required this.attachedClientId,
+    required this.desktopIdentity,
   });
 
   final String defaultSessionId;
   final String hostId;
   final String attachedClientId;
+  final Identity desktopIdentity;
 }
 
 enum CommonCodeDurableBootstrapLoadStatus {

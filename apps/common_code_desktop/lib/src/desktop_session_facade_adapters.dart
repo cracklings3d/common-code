@@ -2,6 +2,9 @@ import 'package:common_code_application/common_code_application.dart';
 import 'package:common_code_domain/common_code_domain.dart';
 import 'package:host_core/host_core.dart';
 
+import 'desktop_session_runtime.dart'
+    show desktopSessionRuntimeIdentityId;
+
 abstract interface class DesktopSessionMutationPort {
   Future<void> acknowledgeNotification({
     required String sessionId,
@@ -23,12 +26,14 @@ final class DesktopSessionBootstrapDriver implements CommonCodeSessionDriver {
     required String defaultSessionId,
     required String hostId,
     required String attachedClientId,
+    String desktopIdentityId = desktopSessionRuntimeIdentityId,
   }) : _bootstrapPort = bootstrapPort,
        _mutationPort = mutationPort,
        _observation = observation,
        _defaultSessionId = defaultSessionId,
        _hostId = hostId,
-       _attachedClientId = attachedClientId;
+       _attachedClientId = attachedClientId,
+       _desktopIdentityId = desktopIdentityId;
 
   final CommonCodeSessionBootstrapPort _bootstrapPort;
   final DesktopSessionMutationPort _mutationPort;
@@ -36,8 +41,10 @@ final class DesktopSessionBootstrapDriver implements CommonCodeSessionDriver {
   final String _defaultSessionId;
   final String _hostId;
   final String _attachedClientId;
+  final String _desktopIdentityId;
 
   String? _currentSessionId;
+  CommonCodeSessionBootstrapRequest? _currentBootstrapRequest;
   final CommonCodeSessionBootstrapLifecycle _bootstrapLifecycle =
       CommonCodeSessionBootstrapLifecycle();
 
@@ -48,15 +55,18 @@ final class DesktopSessionBootstrapDriver implements CommonCodeSessionDriver {
       return CommonCodeSessionBinding.attached(sessionId: currentSessionId);
     }
 
+    final request = CommonCodeSessionBootstrapRequest(
+      defaultSessionId: _defaultSessionId,
+      hostId: _hostId,
+      attachedClientId: _attachedClientId,
+      desktopIdentity: Identity(id: _desktopIdentityId),
+    );
     final bootstrappedSession = await _bootstrapLifecycle.bootstrap(
-      request: CommonCodeSessionBootstrapRequest(
-        defaultSessionId: _defaultSessionId,
-        hostId: _hostId,
-        attachedClientId: _attachedClientId,
-      ),
+      request: request,
       port: _bootstrapPort,
     );
     _currentSessionId = bootstrappedSession.id;
+    _currentBootstrapRequest = request;
     return CommonCodeSessionBinding.attached(sessionId: bootstrappedSession.id);
   }
 
