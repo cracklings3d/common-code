@@ -1,18 +1,18 @@
 ---
 issue: github.com/cracklings3d/common-code#119
 title: Move the current in-memory HostGateway and SessionObservation implementations into `packages/host_in_memory`
-status: draft
-plan_status: proposed
-review_status: pending
+status: approved
+plan_status: approved
+review_status: passed
 source:
   - github.com/cracklings3d/common-code#119
   - controller-stage-c-brief
 owner: architect
 created_at: 2026-05-31
 updated_at: 2026-05-31
-approved_by: null
-approved_at: null
-review_artifact: null
+approved_by: loyal-scarlet-stork
+approved_at: 2026-05-29T00-00:00Z
+review_artifact: 'C:\Users\The_u\.opencode\projects\github-com-cracklings3d-common-code\runs\canonical-issue-resolver-parallel\2026-05-29T00-00-00Z-run-01\reviews\issue-119\loop-2-stage-D.json'
 related_branch: issue-119-move-the-current-in-memory-hostgateway-and-sessionobservation-implementations-into-packages-host_in_memory
 related_pr: null
 replaces: null
