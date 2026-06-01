@@ -4,16 +4,42 @@ import 'package:common_code_application/common_code_application.dart';
 import 'package:common_code_domain/common_code_domain.dart';
 import 'package:flutter/foundation.dart';
 
+import 'desktop_session_facade_adapters.dart';
 import 'desktop_session_runtime.dart';
 
 final class DesktopSessionSnapshot {
   const DesktopSessionSnapshot({
-    required this.session,
+    required this.turns,
+    required this.activeTurnId,
+    required this.contextPresentation,
+    required this.unacknowledgedNotifications,
     required this.attachedClientId,
   });
 
-  final Session session;
+  /// Derived from `session.promptThread.turns`.
+  final List<TurnData> turns;
+
+  /// Derived from `session.activeTurn?.id`.
+  final String? activeTurnId;
+
+  /// Derived from session clients and input client.
+  final SessionContextData contextPresentation;
+
+  /// Derived from `session.notifications` where `isAcknowledged` is false.
+  final List<NotificationData> unacknowledgedNotifications;
+
   final String attachedClientId;
+
+  /// Maps a domain [Session] to this presentation model.
+  factory DesktopSessionSnapshot.fromSession(Session session, String attachedClientId) {
+    return DesktopSessionSnapshot(
+      turns: mapSessionToTurns(session),
+      activeTurnId: session.activeTurn?.id,
+      contextPresentation: mapSessionToContextData(session, attachedClientId),
+      unacknowledgedNotifications: mapSessionToUnacknowledgedNotifications(session),
+      attachedClientId: attachedClientId,
+    );
+  }
 }
 
 enum DesktopSessionControllerStatus { loading, empty, data, error }
@@ -176,10 +202,7 @@ class DesktopSessionController extends ChangeNotifier {
   void _handleRuntimeSnapshot(Session session) {
     _emitState(
       DesktopSessionControllerState.data(
-        DesktopSessionSnapshot(
-          session: session,
-          attachedClientId: attachedClientId,
-        ),
+        DesktopSessionSnapshot.fromSession(session, attachedClientId),
         isSubmitting: _state.isSubmitting,
         acknowledgementErrorMessage: _state.acknowledgementErrorMessage,
       ),

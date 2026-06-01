@@ -1,8 +1,8 @@
-import 'package:common_code_domain/common_code_domain.dart';
 import 'package:flutter/material.dart';
 
 import 'src/desktop_session_app_edge_composition.dart';
 import 'src/desktop_session_controller.dart';
+import 'src/desktop_session_facade_adapters.dart';
 
 void main() {
   runApp(CommonCodeDesktopApp());
@@ -86,7 +86,7 @@ class _SessionScreenState extends State<SessionScreen> {
 
     final snapshot = state.snapshot!;
     final notices = _consumeSessionNotifications(
-      session: snapshot.session,
+      snapshot: snapshot,
       renderedNotificationIds: _renderedNotificationIds,
     );
 
@@ -208,30 +208,40 @@ class _SessionScreenState extends State<SessionScreen> {
 }
 
 List<_SessionNotificationNotice> _consumeSessionNotifications({
-  required Session session,
+  required DesktopSessionSnapshot snapshot,
   required Set<String> renderedNotificationIds,
 }) {
-  final turnsById = {
-    for (final turn in session.promptThread.turns) turn.id: turn,
+  // Build a map of turn ID to submitted text for notification message construction.
+  final turnTexts = {
+    for (final turn in snapshot.turns) turn.id: turn.submittedText,
   };
+
   final notices = <_SessionNotificationNotice>[];
 
-  for (final notification in session.notifications) {
-    if (notification.isAcknowledged ||
-        renderedNotificationIds.contains(notification.id)) {
+  for (final notification in snapshot.unacknowledgedNotifications) {
+    if (renderedNotificationIds.contains(notification.notificationId)) {
       continue;
     }
 
-    final notice = _SessionNotificationNotice.fromNotification(
-      notification: notification,
-      turn: turnsById[notification.turnId],
-    );
-    if (notice == null) {
+    final turnText = turnTexts[notification.turnId];
+    if (turnText == null) {
       continue;
     }
 
-    renderedNotificationIds.add(notification.id);
-    notices.add(notice);
+    final message = switch (notification.transition) {
+      SessionNotificationTransition.queuedToRunning =>
+        'Turn running: $turnText',
+      SessionNotificationTransition.runningToCompleted =>
+        'Turn completed: $turnText',
+      SessionNotificationTransition.runningToFailed =>
+        'Turn failed: $turnText',
+    };
+
+    renderedNotificationIds.add(notification.notificationId);
+    notices.add(_SessionNotificationNotice._(
+      notificationId: notification.notificationId,
+      message: message,
+    ));
   }
 
   return notices;
@@ -242,33 +252,6 @@ final class _SessionNotificationNotice {
     required this.notificationId,
     required this.message,
   });
-
-  static _SessionNotificationNotice? fromNotification({
-    required SessionNotification notification,
-    required Turn? turn,
-  }) {
-    if (turn == null) {
-      return null;
-    }
-
-    return switch (notification.transition) {
-      SessionNotificationTransition.queuedToRunning =>
-        _SessionNotificationNotice._(
-          notificationId: notification.id,
-          message: 'Turn running: ${turn.submittedText}',
-        ),
-      SessionNotificationTransition.runningToCompleted =>
-        _SessionNotificationNotice._(
-          notificationId: notification.id,
-          message: 'Turn completed: ${turn.submittedText}',
-        ),
-      SessionNotificationTransition.runningToFailed =>
-        _SessionNotificationNotice._(
-          notificationId: notification.id,
-          message: 'Turn failed: ${turn.submittedText}',
-        ),
-    };
-  }
 
   final String notificationId;
   final String message;
@@ -354,9 +337,8 @@ class _SessionDataView extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final session = snapshot.session;
-    final turns = session.promptThread.turns;
-    final activeTurnId = session.activeTurn?.id;
+    final turns = snapshot.turns;
+    final activeTurnId = snapshot.activeTurnId;
     final authoringPresentation = _AuthoringPresentation.fromSnapshot(snapshot);
 
     return _SessionSection(
@@ -369,7 +351,7 @@ class _SessionDataView extends StatelessWidget {
           const SizedBox(height: 16),
         ],
         _SessionContextChrome(
-          snapshot: snapshot,
+          contextData: snapshot.contextPresentation,
           authoringPresentation: authoringPresentation,
         ),
         const SizedBox(height: 16),
@@ -412,12 +394,12 @@ final class _AuthoringPresentation {
   });
 
   factory _AuthoringPresentation.fromSnapshot(DesktopSessionSnapshot snapshot) {
-    final session = snapshot.session;
-    if (session.activeTurn == null) {
+    // An active turn exists when activeTurnId is not null
+    if (snapshot.activeTurnId == null) {
       return const _AuthoringPresentation._(mode: _AuthoringMode.available);
     }
 
-    final inputClientId = session.inputClient?.id;
+    final inputClientId = snapshot.contextPresentation.inputClientId;
 
     if (inputClientId == snapshot.attachedClientId) {
       return _AuthoringPresentation._(
@@ -460,17 +442,15 @@ final class _AuthoringPresentation {
 
 class _SessionContextChrome extends StatelessWidget {
   const _SessionContextChrome({
-    required this.snapshot,
+    required this.contextData,
     required this.authoringPresentation,
   });
 
-  final DesktopSessionSnapshot snapshot;
+  final SessionContextData contextData;
   final _AuthoringPresentation authoringPresentation;
 
   @override
   Widget build(BuildContext context) {
-    final session = snapshot.session;
-
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.all(16),
@@ -487,8 +467,8 @@ class _SessionContextChrome extends StatelessWidget {
             style: Theme.of(context).textTheme.titleMedium,
           ),
           const SizedBox(height: 12),
-          Text('Local desktop Client: ${snapshot.attachedClientId}'),
-          Text('Current Input Client: ${session.inputClient?.id ?? 'none'}'),
+          Text('Local desktop Client: ${contextData.attachedClientId}'),
+          Text('Current Input Client: ${contextData.inputClientId ?? 'none'}'),
           Text('Authoring Mode: ${authoringPresentation.modeLabel}'),
           const SizedBox(height: 12),
           Text(
@@ -500,11 +480,11 @@ class _SessionContextChrome extends StatelessWidget {
             spacing: 8,
             runSpacing: 8,
             children: [
-              for (final client in session.clients)
+              for (final client in contextData.clients)
                 _AttachedClientChip(
                   clientId: client.id,
-                  isLocal: client.id == snapshot.attachedClientId,
-                  isInput: client.id == session.inputClient?.id,
+                  isLocal: client.isLocal,
+                  isInput: client.isInput,
                 ),
             ],
           ),
@@ -624,7 +604,7 @@ class _PromptThreadTurnCard extends StatelessWidget {
     required this.isActiveTurn,
   });
 
-  final Turn turn;
+  final TurnData turn;
   final String attachedClientId;
   final bool isActiveTurn;
 
@@ -682,7 +662,7 @@ final class _TurnLifecyclePresentation {
   const _TurnLifecyclePresentation._({required this.inlineLabel});
 
   factory _TurnLifecyclePresentation.fromTurn(
-    Turn turn, {
+    TurnData turn, {
     required bool isActiveTurn,
   }) {
     return _TurnLifecyclePresentation._(

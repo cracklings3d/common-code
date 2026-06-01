@@ -21,7 +21,7 @@ void main() {
 
         expect(controller.state.status, DesktopSessionControllerStatus.loading);
 
-        runtime.emitSnapshot(_snapshot.session);
+        runtime.emitSnapshot(_bootstrapSession);
         await initializeFuture;
 
         expect(controller.state.status, DesktopSessionControllerStatus.data);
@@ -38,7 +38,7 @@ void main() {
 
       expect(controller.state.status, DesktopSessionControllerStatus.loading);
 
-      runtime.emitSnapshot(_snapshot.session);
+      runtime.emitSnapshot(_bootstrapSession);
       await refreshFuture;
 
       expect(controller.state.status, DesktopSessionControllerStatus.data);
@@ -48,11 +48,12 @@ void main() {
       final runtime = _FakeDesktopSessionRuntime();
       final controller = DesktopSessionController(runtime: runtime);
 
-      runtime.emitSnapshot(_snapshot.session);
+      runtime.emitSnapshot(_bootstrapSession);
 
       expect(controller.state.status, DesktopSessionControllerStatus.data);
       expect(controller.state.snapshot, isNotNull);
-      expect(controller.state.snapshot!.session.id, 'desktop-session');
+      expect(controller.state.snapshot!.attachedClientId, 'desktop-client');
+      expect(controller.state.snapshot!.turns, isEmpty);
     });
 
     test('runtime watch errors map to renderable error state', () {
@@ -69,7 +70,7 @@ void main() {
       final runtime = _FakeDesktopSessionRuntime();
       final controller = DesktopSessionController(runtime: runtime);
 
-      runtime.emitSnapshot(_snapshot.session);
+      runtime.emitSnapshot(_bootstrapSession);
 
       final submitFuture = controller.submitTurn(submittedText: 'queued turn');
 
@@ -87,7 +88,7 @@ void main() {
       final runtime = _FakeDesktopSessionRuntime();
       final controller = DesktopSessionController(runtime: runtime);
 
-      runtime.emitSnapshot(_snapshot.session);
+      runtime.emitSnapshot(_bootstrapSession);
 
       final submitFuture = controller.submitTurn(
         submittedText: 'delegated turn',
@@ -137,7 +138,7 @@ void main() {
           ..acknowledgementError = StateError('ack failed');
         final controller = DesktopSessionController(runtime: runtime);
 
-        runtime.emitSnapshot(_snapshot.session);
+        runtime.emitSnapshot(_bootstrapSession);
 
         await expectLater(
           controller.acknowledgeNotification(notificationId: 'notice-1'),
@@ -159,7 +160,7 @@ void main() {
           ..acknowledgementError = StateError('ack failed');
         final controller = DesktopSessionController(runtime: runtime);
 
-        runtime.emitSnapshot(_snapshot.session);
+        runtime.emitSnapshot(_bootstrapSession);
 
         await expectLater(
           controller.acknowledgeNotification(notificationId: 'notice-1'),
@@ -167,7 +168,7 @@ void main() {
         );
 
         runtime.emitSnapshot(
-          _bootstrapSession().startTurn(
+          _bootstrapSession.startTurn(
             turnId: 'turn-1',
             client: const Client(id: 'desktop-client'),
             submittedText: 'unrelated runtime update',
@@ -189,7 +190,7 @@ void main() {
           ..submitError = StateError('submit failed');
         final controller = DesktopSessionController(runtime: runtime);
 
-        runtime.emitSnapshot(_snapshot.session);
+        runtime.emitSnapshot(_bootstrapSession);
 
         await expectLater(
           controller.submitTurn(submittedText: 'bad turn'),
@@ -206,11 +207,11 @@ void main() {
       final runtime = _FakeDesktopSessionRuntime();
       final controller = DesktopSessionController(runtime: runtime);
 
-      runtime.emitSnapshot(_snapshot.session);
+      runtime.emitSnapshot(_bootstrapSession);
       controller.dispose();
 
       runtime.emitSnapshot(
-        _bootstrapSession().startTurn(
+        _bootstrapSession.startTurn(
           turnId: 'turn-1',
           client: const Client(id: 'desktop-client'),
           submittedText: 'late event',
@@ -219,21 +220,23 @@ void main() {
       runtime.emitWatchError(StateError('late watch boom'));
 
       expect(controller.state.status, DesktopSessionControllerStatus.data);
-      expect(controller.state.snapshot!.session.activeTurn, isNull);
+      expect(controller.state.snapshot!.activeTurnId, isNull);
     });
   });
 }
 
-final _snapshot = DesktopSessionSnapshot(
-  session: Session(
-    id: 'desktop-session',
-    activeHost: const Host(id: 'desktop-host'),
-    clients: const [Client(id: 'desktop-client')],
-  ),
-  attachedClientId: 'desktop-client',
+final _bootstrapSession = Session(
+  id: 'desktop-session',
+  activeHost: const Host(id: 'desktop-host'),
+  clients: const [Client(id: 'desktop-client')],
 );
 
-Session _bootstrapSession() {
+final _snapshot = DesktopSessionSnapshot.fromSession(
+  _bootstrapSession,
+  'desktop-client',
+);
+
+Session _buildBootstrapSession() {
   return Session(
     id: 'desktop-session',
     activeHost: const Host(id: 'desktop-host'),
