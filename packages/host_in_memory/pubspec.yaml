@@ -6,7 +6,5 @@ environment:
 dependencies:
   common_code_domain:
     path: ../common_code_domain
-  host_core:
-    path: ../host_core
   common_code_application:
     path: ../common_code_application
