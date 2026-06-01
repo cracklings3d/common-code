@@ -9,7 +9,6 @@ import 'package:common_code_domain/common_code_domain.dart';
 import 'package:common_code_observability/common_code_observability.dart';
 import 'package:common_code_persistence/common_code_persistence.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:host_core/host_core.dart';
 import 'package:host_in_memory/host_in_memory.dart';
 
 void main() {
@@ -343,6 +342,60 @@ void main() {
               'HostServiceSessionObservation - that type belongs to '
               'the host_in_memory package.',
         );
+
+        // Assert the live desktop/in-memory path does NOT import host_core
+        // (HostService is now Application-owned via common_code_application)
+        final runtimeSrcFile = File.fromUri(
+          libSrcDirUri.resolve('desktop_session_runtime.dart'),
+        );
+        final runtimeContent = await runtimeSrcFile.readAsString();
+        expect(
+          runtimeContent,
+          isNot(contains("import 'package:host_core/host_core.dart'")),
+          reason:
+              'desktop_session_runtime.dart must not import host_core - '
+              'HostService is now Application-owned via common_code_application.',
+        );
+
+        expect(
+          facadeAdaptersContent,
+          isNot(contains("import 'package:host_core/host_core.dart'")),
+          reason:
+              'desktop_session_facade_adapters.dart must not import host_core - '
+              'HostService is now Application-owned via common_code_application.',
+        );
+
+        expect(
+          compositionContent,
+          isNot(contains("import 'package:host_core/host_core.dart'")),
+          reason:
+              'desktop_session_app_edge_composition.dart must not import host_core - '
+              'HostService is now Application-owned via common_code_application.',
+        );
+
+        // Assert host_in_memory source files do NOT import host_core directly
+        // (they should use Application-owned HostService from common_code_application)
+        final hostInMemoryDir = testDir.parent.parent.uri.resolve(
+          'packages/host_in_memory/lib/src/',
+        );
+        for (final fileName in [
+          'in_memory_host_adapter.dart',
+          'in_memory_host_gateway.dart',
+          'in_memory_host_service.dart',
+          'in_memory_session_observation.dart',
+        ]) {
+          final srcFile = File.fromUri(hostInMemoryDir.resolve(fileName));
+          if (await srcFile.exists()) {
+            final srcContent = await srcFile.readAsString();
+            expect(
+              srcContent,
+              isNot(contains("import 'package:host_core/host_core.dart'")),
+              reason:
+                  '$fileName must not import host_core - '
+                  'it must use HostService from common_code_application.',
+            );
+          }
+        }
       },
     );
   });
