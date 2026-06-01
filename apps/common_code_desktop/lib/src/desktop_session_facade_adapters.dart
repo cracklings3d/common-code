@@ -5,6 +5,125 @@ import 'package:host_core/host_core.dart';
 import 'desktop_session_runtime.dart'
     show desktopSessionRuntimeIdentityId;
 
+// Re-export domain types needed for presentation switch expressions.
+// This allows presentation files to use domain enums without directly importing the domain package.
+export 'package:common_code_domain/common_code_domain.dart'
+    show TurnStatus, SessionNotificationTransition;
+
+/// Presentation model for a turn - used to render prompt thread cards.
+/// Does not expose raw domain [Turn] type.
+final class TurnData {
+  const TurnData({
+    required this.id,
+    required this.clientId,
+    required this.submittedText,
+    required this.status,
+    this.failureSummary,
+  });
+
+  final String id;
+  final String clientId;
+  final String submittedText;
+  final TurnStatus status;
+  final String? failureSummary;
+
+  static TurnData fromTurn(Turn turn) {
+    return TurnData(
+      id: turn.id,
+      clientId: turn.clientId,
+      submittedText: turn.submittedText,
+      status: turn.status,
+      failureSummary: turn.failureSummary,
+    );
+  }
+}
+
+/// Presentation model for a notification - used to render snackbars.
+/// Does not expose raw domain [SessionNotification] type.
+final class NotificationData {
+  const NotificationData({
+    required this.notificationId,
+    required this.turnId,
+    required this.transition,
+    required this.isAcknowledged,
+  });
+
+  final String notificationId;
+  final String turnId;
+  final SessionNotificationTransition transition;
+  final bool isAcknowledged;
+
+  static NotificationData fromNotification(SessionNotification notification) {
+    return NotificationData(
+      notificationId: notification.id,
+      turnId: notification.turnId,
+      transition: notification.transition,
+      isAcknowledged: notification.isAcknowledged,
+    );
+  }
+}
+
+/// Presentation model for an attached client - used to render client chips.
+/// Does not expose raw domain [Client] type beyond id.
+final class ClientData {
+  const ClientData({
+    required this.id,
+    required this.isLocal,
+    required this.isInput,
+  });
+
+  final String id;
+  final bool isLocal;
+  final bool isInput;
+}
+
+/// Presentation model for session context chrome.
+/// Does not expose raw domain [Session] type.
+final class SessionContextData {
+  const SessionContextData({
+    required this.attachedClientId,
+    required this.inputClientId,
+    required this.clients,
+  });
+
+  final String attachedClientId;
+  final String? inputClientId;
+  final List<ClientData> clients;
+}
+
+/// Maps a domain [Session] to presentation-ready data structures.
+SessionContextData mapSessionToContextData(Session session, String attachedClientId) {
+  final inputClientId = session.inputClient?.id;
+  return SessionContextData(
+    attachedClientId: attachedClientId,
+    inputClientId: inputClientId,
+    clients: [
+      for (final client in session.clients)
+        ClientData(
+          id: client.id,
+          isLocal: client.id == attachedClientId,
+          isInput: client.id == inputClientId,
+        ),
+    ],
+  );
+}
+
+/// Maps a domain [Session] to a list of [TurnData].
+List<TurnData> mapSessionToTurns(Session session) {
+  return [
+    for (final turn in session.promptThread.turns) TurnData.fromTurn(turn),
+  ];
+}
+
+/// Maps a domain [Session] to unacknowledged [NotificationData] items.
+List<NotificationData> mapSessionToUnacknowledgedNotifications(Session session) {
+  return [
+    for (final notification in session.notifications)
+      if (!notification.isAcknowledged)
+        NotificationData.fromNotification(notification),
+  ];
+}
+
 abstract interface class DesktopSessionMutationPort {
   Future<void> acknowledgeNotification({
     required String sessionId,
