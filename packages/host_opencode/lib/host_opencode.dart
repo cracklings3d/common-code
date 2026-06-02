@@ -8,6 +8,9 @@ library;
 ///
 /// Desktop composition imports this file to access:
 /// - [OpenCodeHostAdapter] - the host service adapter for OpenCode sessions
+/// - [OutOfProcessOpenCodeHostAdapter] - the out-of-process host adapter
+/// - [OpenCodeHostProcessLauncher] - the process launcher for spawning host
+/// - [OpenCodeHostProcessConnector] - the process connector for connecting to host
 /// - [OpenCodeHostGateway] - the host gateway implementation
 /// - [OpenCodePersistingHostServiceSessionObservation] - the persisting observation
 /// - [OpenCodeHostServiceSessionObservation] - the base observation
@@ -16,4 +19,7 @@ library;
 /// they remain internal to the adapter boundary.
 export 'src/opencode_host_adapter.dart';
 export 'src/opencode_host_gateway.dart';
+export 'src/opencode_host_process_connector.dart';
+export 'src/opencode_host_process_launcher.dart';
+export 'src/opencode_out_of_process_host_adapter.dart';
 export 'src/opencode_session_observation.dart';
