@@ -42,6 +42,8 @@ dependencies:
     path: ../../packages/common_code_persistence
   host_in_memory:
     path: ../../packages/host_in_memory
+  host_opencode:
+    path: ../../packages/host_opencode
   shared_preferences: ^2.5.3
 
 dev_dependencies:

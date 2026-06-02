@@ -5,7 +5,7 @@ import 'package:common_code_domain/common_code_domain.dart';
 import 'package:common_code_observability/common_code_observability.dart';
 import 'package:common_code_persistence/common_code_persistence.dart';
 
-import 'package:host_in_memory/host_in_memory.dart';
+import 'package:host_opencode/host_opencode.dart';
 
 import 'desktop_session_facade_adapters.dart';
 import 'desktop_session_runtime.dart';
@@ -37,7 +37,7 @@ CommonCodeSessionFacade createDesktopSessionFacade({
         durableStorage: durableStorage,
       );
   final effectiveHostService =
-      (hostService as HostService?) ?? (InMemoryHostAdapter() as HostService);
+      (hostService as HostService?) ?? (OpenCodeHostAdapter() as HostService);
   final effectiveBootstrapPort =
       (bootstrapPort as CommonCodeSessionBootstrapPort?) ??
       CommonCodeSessionBootstrapPortAdapter(
@@ -59,7 +59,7 @@ CommonCodeSessionFacade createDesktopSessionFacade({
   final CommonCodeSessionDriver effectiveDriver;
   final CommonCodeSessionObservation effectiveObservation;
   final HostGateway effectiveGateway;
-  final sessionGateway = PersistingHostServiceSessionMutations(
+  final sessionGateway = OpenCodeHostGateway(
     hostService: effectiveHostService,
     persistSessionMutation: effectivePersistSessionMutation,
   );
@@ -87,8 +87,8 @@ CommonCodeSessionFacade createDesktopSessionFacade({
   } else {
     effectiveObservation =
         observation ??
-        PersistingHostServiceSessionObservation(
-          observation: HostServiceSessionObservation(effectiveHostService),
+        OpenCodePersistingHostServiceSessionObservation(
+          observation: OpenCodeHostServiceSessionObservation(effectiveHostService),
           persistSessionMutation: effectivePersistSessionMutation,
         );
     effectiveDriver = DesktopSessionBootstrapDriver(
@@ -138,7 +138,7 @@ HostDesktopSessionRuntime createDesktopSessionRuntime({
     diagnosticsSink,
   );
   final effectiveHostService =
-      hostService ?? (InMemoryHostAdapter() as HostService);
+      hostService ?? (OpenCodeHostAdapter() as HostService);
   final sessionStore = DurableLocalSessionStore.fromPersistenceComponents(
     legacySnapshotStore: effectiveSnapshotStore,
     durableStorage: durableStorage,
