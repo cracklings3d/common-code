@@ -18,7 +18,8 @@ final class OpenCodeHostConnectionFailure {
 sealed class OpenCodeHostConnectionOutcome {}
 
 /// Successful connection outcome with handle.
-final class OpenCodeHostConnectionSuccess extends OpenCodeHostConnectionOutcome {
+final class OpenCodeHostConnectionSuccess
+    extends OpenCodeHostConnectionOutcome {
   OpenCodeHostConnectionSuccess(this.handle);
 
   final OpenCodeHostConnectionHandle handle;

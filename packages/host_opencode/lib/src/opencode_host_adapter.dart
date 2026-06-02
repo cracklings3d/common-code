@@ -214,7 +214,8 @@ final class OpenCodeHostAdapter implements HostService {
           update: (session) => switch (_simulationPolicy.terminalOutcome) {
             OpenCodeSimulatedTurnTerminalOutcome.completed =>
               session.completeActiveTurn(),
-            OpenCodeSimulatedTurnTerminalOutcome.failed => session.failActiveTurn(
+            OpenCodeSimulatedTurnTerminalOutcome.failed =>
+              session.failActiveTurn(
                 failureSummary: _simulationPolicy.failureSummary,
               ),
           },

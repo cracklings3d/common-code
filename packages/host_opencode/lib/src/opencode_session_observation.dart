@@ -31,8 +31,8 @@ final class OpenCodePersistingHostServiceSessionObservation
   const OpenCodePersistingHostServiceSessionObservation({
     required CommonCodeSessionObservation observation,
     required void Function(Session session)? persistSessionMutation,
-  }) : _observation = observation,
-       _persistSessionMutation = persistSessionMutation;
+  })  : _observation = observation,
+        _persistSessionMutation = persistSessionMutation;
 
   final CommonCodeSessionObservation _observation;
   final void Function(Session session)? _persistSessionMutation;
@@ -59,7 +59,7 @@ OpenCodePersistingHostServiceSessionObservation
   required CommonCodeSessionObservation observation,
   required void Function(Session session)? persistSessionMutation,
 }) =>
-    OpenCodePersistingHostServiceSessionObservation(
-      observation: observation,
-      persistSessionMutation: persistSessionMutation,
-    );
+        OpenCodePersistingHostServiceSessionObservation(
+          observation: observation,
+          persistSessionMutation: persistSessionMutation,
+        );

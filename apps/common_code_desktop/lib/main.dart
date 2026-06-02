@@ -10,9 +10,9 @@ void main() {
 
 class CommonCodeDesktopApp extends StatelessWidget {
   CommonCodeDesktopApp({super.key, DesktopSessionController? sessionController})
-    : sessionController = sessionController ?? DesktopSessionController(
-        runtime: createDesktopSessionRuntime(),
-      ),
+    : sessionController =
+          sessionController ??
+          DesktopSessionController(runtime: createDesktopSessionRuntime()),
       _ownsSessionController = sessionController == null;
 
   final DesktopSessionController sessionController;
@@ -233,15 +233,16 @@ List<_SessionNotificationNotice> _consumeSessionNotifications({
         'Turn running: $turnText',
       SessionNotificationTransition.runningToCompleted =>
         'Turn completed: $turnText',
-      SessionNotificationTransition.runningToFailed =>
-        'Turn failed: $turnText',
+      SessionNotificationTransition.runningToFailed => 'Turn failed: $turnText',
     };
 
     renderedNotificationIds.add(notification.notificationId);
-    notices.add(_SessionNotificationNotice._(
-      notificationId: notification.notificationId,
-      message: message,
-    ));
+    notices.add(
+      _SessionNotificationNotice._(
+        notificationId: notification.notificationId,
+        message: message,
+      ),
+    );
   }
 
   return notices;

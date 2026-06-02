@@ -335,15 +335,17 @@ void main() {
         await firstRuntime.initialize();
         await sessionStore.waitForPendingPersistence();
 
-        expect(watchError, isNull,
-            reason: 'First runtime watch must succeed');
-        expect(firstSnapshot, isNotNull,
-            reason: 'First runtime must receive snapshot');
+        expect(watchError, isNull, reason: 'First runtime watch must succeed');
+        expect(
+          firstSnapshot,
+          isNotNull,
+          reason: 'First runtime must receive snapshot',
+        );
 
         // Emit host-driven streamed notifications through the watch path
         // (not through submitTurn), proving watch itself triggers persistence.
-        final streamedSnapshot =
-            firstHostAdapter.emitStreamedSessionWithNotifications();
+        final streamedSnapshot = firstHostAdapter
+            .emitStreamedSessionWithNotifications();
         await sessionStore.waitForPendingPersistence();
 
         // AC2: Prove still-unacknowledged notifications replay after restart
@@ -354,13 +356,19 @@ void main() {
             .map((notification) => notification.id)
             .toSet();
 
-        expect(unacknowledgedNotificationIds, isNotEmpty,
-            reason: 'AC2 requires at least one unacknowledged notification');
+        expect(
+          unacknowledgedNotificationIds,
+          isNotEmpty,
+          reason: 'AC2 requires at least one unacknowledged notification',
+        );
 
         // Capture payload to prove persistence occurred
         final payloadAfterStream = durableStorage.payload;
-        expect(payloadAfterStream, isNotNull,
-            reason: 'Streamed session must persist notification state');
+        expect(
+          payloadAfterStream,
+          isNotNull,
+          reason: 'Streamed session must persist notification state',
+        );
 
         // AC4: The assertion below will fail if streamed transitions emitted
         // before restart are missing from restored state.
@@ -397,10 +405,16 @@ void main() {
 
         await secondRuntime.initialize();
 
-        expect(watchError, isNull,
-            reason: 'Restart watch must succeed (no active watch conflict)');
-        expect(restartedSnapshot, isNotNull,
-            reason: 'Restart must receive snapshot from persistence');
+        expect(
+          watchError,
+          isNull,
+          reason: 'Restart watch must succeed (no active watch conflict)',
+        );
+        expect(
+          restartedSnapshot,
+          isNotNull,
+          reason: 'Restart must receive snapshot from persistence',
+        );
 
         // AC2: Unacknowledged notifications from the streamed session MUST
         // be present in the restarted runtime's snapshot - they replay.
@@ -411,10 +425,13 @@ void main() {
                 notification.id == notificationId &&
                 !notification.isAcknowledged,
           );
-          expect(found, isTrue,
-              reason:
-                  'AC2: Unacknowledged notification $notificationId must '
-                  'replay after restart (was lost if this fails)');
+          expect(
+            found,
+            isTrue,
+            reason:
+                'AC2: Unacknowledged notification $notificationId must '
+                'replay after restart (was lost if this fails)',
+          );
         }
       },
     );
@@ -460,14 +477,16 @@ void main() {
         await firstRuntime.initialize();
         await sessionStore.waitForPendingPersistence();
 
-        expect(watchError, isNull,
-            reason: 'First runtime watch must succeed');
-        expect(firstSnapshot, isNotNull,
-            reason: 'First runtime must receive snapshot');
+        expect(watchError, isNull, reason: 'First runtime watch must succeed');
+        expect(
+          firstSnapshot,
+          isNotNull,
+          reason: 'First runtime must receive snapshot',
+        );
 
         // Emit streamed notifications
-        final streamedSnapshot =
-            firstHostAdapter.emitStreamedSessionWithNotifications();
+        final streamedSnapshot = firstHostAdapter
+            .emitStreamedSessionWithNotifications();
         await sessionStore.waitForPendingPersistence();
 
         // Record the notification IDs before acknowledgement
@@ -476,10 +495,12 @@ void main() {
             .map((notification) => notification.id)
             .toSet();
         // Acknowledge one unacknowledged notification and persist
-        final toAcknowledge = firstSnapshot!.notifications
-            .firstWhere((notification) => !notification.isAcknowledged);
-        final stillUnacknowledgedIds =
-            unacknowledgedIdsBefore.difference({toAcknowledge.id});
+        final toAcknowledge = firstSnapshot!.notifications.firstWhere(
+          (notification) => !notification.isAcknowledged,
+        );
+        final stillUnacknowledgedIds = unacknowledgedIdsBefore.difference({
+          toAcknowledge.id,
+        });
         final acknowledgedSession = firstHostAdapter.acknowledgeNotification(
           sessionId: firstSnapshot!.id,
           notificationId: toAcknowledge.id,
@@ -524,26 +545,39 @@ void main() {
 
         await secondRuntime.initialize();
 
-        expect(watchError, isNull,
-            reason: 'First restart watch must succeed (no active watch conflict)');
-        expect(secondSnapshot, isNotNull,
-            reason: 'First restart must receive snapshot from persistence');
+        expect(
+          watchError,
+          isNull,
+          reason: 'First restart watch must succeed (no active watch conflict)',
+        );
+        expect(
+          secondSnapshot,
+          isNotNull,
+          reason: 'First restart must receive snapshot from persistence',
+        );
 
         // Verify acknowledgement persisted across first restart
         final acknowledgedInSecond = secondSnapshot!.notifications.firstWhere(
           (notification) => notification.id == toAcknowledge.id,
         );
-        expect(acknowledgedInSecond.isAcknowledged, isTrue,
-            reason: 'Acknowledgement must persist through restart');
+        expect(
+          acknowledgedInSecond.isAcknowledged,
+          isTrue,
+          reason: 'Acknowledgement must persist through restart',
+        );
 
         // Unacknowledged notifications must still be present after restart
         final localSecondSnapshot = secondSnapshot!;
         for (final id in stillUnacknowledgedIds) {
           final found = localSecondSnapshot.notifications.any(
-            (notification) => notification.id == id && !notification.isAcknowledged,
+            (notification) =>
+                notification.id == id && !notification.isAcknowledged,
           );
-          expect(found, isTrue,
-              reason: 'Unacknowledged notification $id must survive restart');
+          expect(
+            found,
+            isTrue,
+            reason: 'Unacknowledged notification $id must survive restart',
+          );
         }
 
         // Second restart: acknowledged notification must NOT replay as
@@ -580,29 +614,43 @@ void main() {
 
         await thirdRuntime.initialize();
 
-        expect(watchError, isNull,
-            reason: 'Second restart watch must succeed (no active watch conflict)');
-        expect(thirdSnapshot, isNotNull,
-            reason: 'Second restart must receive snapshot from persistence');
+        expect(
+          watchError,
+          isNull,
+          reason:
+              'Second restart watch must succeed (no active watch conflict)',
+        );
+        expect(
+          thirdSnapshot,
+          isNotNull,
+          reason: 'Second restart must receive snapshot from persistence',
+        );
 
         // AC3: The notification that was acknowledged before the second restart
         // must STILL be acknowledged after the third restart - it does not replay.
         final acknowledgedInThird = thirdSnapshot!.notifications.firstWhere(
           (notification) => notification.id == toAcknowledge.id,
         );
-        expect(acknowledgedInThird.isAcknowledged, isTrue,
-            reason:
-                'AC3: Acknowledged notification must not replay as '
-                'unacknowledged after subsequent restart');
+        expect(
+          acknowledgedInThird.isAcknowledged,
+          isTrue,
+          reason:
+              'AC3: Acknowledged notification must not replay as '
+              'unacknowledged after subsequent restart',
+        );
 
         // Unacknowledged notifications must still be present
         final localThirdSnapshot = thirdSnapshot!;
         for (final id in stillUnacknowledgedIds) {
           final found = localThirdSnapshot.notifications.any(
-            (notification) => notification.id == id && !notification.isAcknowledged,
+            (notification) =>
+                notification.id == id && !notification.isAcknowledged,
           );
-          expect(found, isTrue,
-              reason: 'Unacknowledged notification $id must survive restart');
+          expect(
+            found,
+            isTrue,
+            reason: 'Unacknowledged notification $id must survive restart',
+          );
         }
       },
     );
@@ -644,7 +692,8 @@ void main() {
 
         // Emit a fresh session with known acknowledged+unacknowledged notifications
         // through the watch stream. This is the non-vacuous baseline for AC2.
-        final streamedSnapshot = hostAdapter.emitStreamedSessionWithNotifications();
+        final streamedSnapshot = hostAdapter
+            .emitStreamedSessionWithNotifications();
         await sessionStore.waitForPendingPersistence();
 
         // Capture the initial payload after the streamed emission
@@ -667,8 +716,11 @@ void main() {
         expect(payloadAfter, isNotNull);
 
         // Prove distinct write from the watch path
-        expect(payloadAfter, isNot(equals(initialPayload)),
-            reason: 'Watch path must trigger distinct write beyond initialize()');
+        expect(
+          payloadAfter,
+          isNot(equals(initialPayload)),
+          reason: 'Watch path must trigger distinct write beyond initialize()',
+        );
 
         final decoded = const SessionSnapshotCodec().decode(
           jsonDecode(payloadAfter!),
@@ -684,12 +736,22 @@ void main() {
               'Notification ${original.id} not found after persistence',
             ),
           );
-          expect(persisted.isAcknowledged, original.isAcknowledged,
-              reason: 'Notification ${original.id} isAcknowledged must be preserved');
-          expect(persisted.turnId, original.turnId,
-              reason: 'Notification ${original.id} turnId must be preserved');
-          expect(persisted.transition, original.transition,
-              reason: 'Notification ${original.id} transition must be preserved');
+          expect(
+            persisted.isAcknowledged,
+            original.isAcknowledged,
+            reason:
+                'Notification ${original.id} isAcknowledged must be preserved',
+          );
+          expect(
+            persisted.turnId,
+            original.turnId,
+            reason: 'Notification ${original.id} turnId must be preserved',
+          );
+          expect(
+            persisted.transition,
+            original.transition,
+            reason: 'Notification ${original.id} transition must be preserved',
+          );
         }
       },
     );
@@ -1135,7 +1197,8 @@ final class _MultiEmittingInMemoryHostAdapter implements HostService {
     required String submittedText,
   }) {
     final session = _sessions[sessionId]!;
-    final turnNumber = session.promptThread.turns
+    final turnNumber =
+        session.promptThread.turns
             .where((t) => t.clientId == client.id)
             .length +
         1;

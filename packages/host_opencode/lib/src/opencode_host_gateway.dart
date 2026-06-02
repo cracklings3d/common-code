@@ -13,8 +13,8 @@ final class OpenCodeHostGateway implements HostGateway {
   const OpenCodeHostGateway({
     required HostService hostService,
     required void Function(Session session)? persistSessionMutation,
-  }) : _hostService = hostService,
-       _persistSessionMutation = persistSessionMutation;
+  })  : _hostService = hostService,
+        _persistSessionMutation = persistSessionMutation;
 
   final HostService _hostService;
   final void Function(Session session)? _persistSessionMutation;

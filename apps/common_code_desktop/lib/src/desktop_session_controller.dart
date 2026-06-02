@@ -31,12 +31,17 @@ final class DesktopSessionSnapshot {
   final String attachedClientId;
 
   /// Maps a domain [Session] to this presentation model.
-  factory DesktopSessionSnapshot.fromSession(Session session, String attachedClientId) {
+  factory DesktopSessionSnapshot.fromSession(
+    Session session,
+    String attachedClientId,
+  ) {
     return DesktopSessionSnapshot(
       turns: mapSessionToTurns(session),
       activeTurnId: session.activeTurn?.id,
       contextPresentation: mapSessionToContextData(session, attachedClientId),
-      unacknowledgedNotifications: mapSessionToUnacknowledgedNotifications(session),
+      unacknowledgedNotifications: mapSessionToUnacknowledgedNotifications(
+        session,
+      ),
       attachedClientId: attachedClientId,
     );
   }
@@ -108,9 +113,8 @@ final class DesktopSessionControllerState {
 }
 
 class DesktopSessionController extends ChangeNotifier {
-  DesktopSessionController({
-    DesktopSessionRuntime? runtime,
-  }) : _runtime = runtime {
+  DesktopSessionController({DesktopSessionRuntime? runtime})
+    : _runtime = runtime {
     _runtime?.bind(
       onSnapshot: _handleRuntimeSnapshot,
       onWatchError: _handleRuntimeWatchError,

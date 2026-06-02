@@ -20,47 +20,46 @@ void main() {
     SharedPreferences.setMockInitialValues(<String, Object>{});
   });
 
-  testWidgets(
-    'data state renders a prompt thread conversation',
-    (WidgetTester tester) async {
-      // Note: this test verifies the UI rendering once a session is established.
-      // The real production bootstrap uses OutOfProcessOpenCodeHostAdapter which
-      // requires a running OpenCode host process; that integration scenario is
-      // exercised separately. Here we drive the UI into the data state via a
-      // fake controller, which is the same pattern used by the rest of these
-      // widget tests.
-      final completer = Completer<void>();
-      final controller = _FakeDesktopSessionController(
-        onInitialize: (controller) async {
-          await completer.future;
-          controller.emit(DesktopSessionControllerState.data(_buildSnapshot()));
-        },
-      );
+  testWidgets('data state renders a prompt thread conversation', (
+    WidgetTester tester,
+  ) async {
+    // Note: this test verifies the UI rendering once a session is established.
+    // The real production bootstrap uses OutOfProcessOpenCodeHostAdapter which
+    // requires a running OpenCode host process; that integration scenario is
+    // exercised separately. Here we drive the UI into the data state via a
+    // fake controller, which is the same pattern used by the rest of these
+    // widget tests.
+    final completer = Completer<void>();
+    final controller = _FakeDesktopSessionController(
+      onInitialize: (controller) async {
+        await completer.future;
+        controller.emit(DesktopSessionControllerState.data(_buildSnapshot()));
+      },
+    );
 
-      await tester.pumpWidget(
-        CommonCodeDesktopApp(sessionController: controller),
-      );
+    await tester.pumpWidget(
+      CommonCodeDesktopApp(sessionController: controller),
+    );
 
-      expect(find.text('Loading session...'), findsOneWidget);
+    expect(find.text('Loading session...'), findsOneWidget);
 
-      completer.complete();
-      await tester.pumpAndSettle();
+    completer.complete();
+    await tester.pumpAndSettle();
 
-      expect(find.text('Prompt Thread'), findsOneWidget);
-      expect(find.text('Session context'), findsOneWidget);
-      expect(find.text('Local desktop Client: desktop-client'), findsOneWidget);
-      expect(find.text('Current Input Client: none'), findsOneWidget);
-      expect(find.text('Authoring Mode: available'), findsOneWidget);
-      expect(find.text('desktop-client (local)'), findsOneWidget);
-      expect(find.text('No turns yet'), findsOneWidget);
-      expect(
-        find.text('Submit the next turn to start this Prompt Thread.'),
-        findsOneWidget,
-      );
-      expect(find.widgetWithText(TextField, 'Next Turn'), findsOneWidget);
-      expect(find.text('Submit Turn'), findsOneWidget);
-    },
-  );
+    expect(find.text('Prompt Thread'), findsOneWidget);
+    expect(find.text('Session context'), findsOneWidget);
+    expect(find.text('Local desktop Client: desktop-client'), findsOneWidget);
+    expect(find.text('Current Input Client: none'), findsOneWidget);
+    expect(find.text('Authoring Mode: available'), findsOneWidget);
+    expect(find.text('desktop-client (local)'), findsOneWidget);
+    expect(find.text('No turns yet'), findsOneWidget);
+    expect(
+      find.text('Submit the next turn to start this Prompt Thread.'),
+      findsOneWidget,
+    );
+    expect(find.widgetWithText(TextField, 'Next Turn'), findsOneWidget);
+    expect(find.text('Submit Turn'), findsOneWidget);
+  });
 
   testWidgets('loading state is visible before the screen settles', (
     WidgetTester tester,

@@ -625,7 +625,8 @@ void main() {
 
         // Emit a fresh session with known acknowledged+unacknowledged notifications
         // through the watch stream. This is the non-vacuous baseline for AC2.
-        final streamedSnapshot = hostAdapter.emitStreamedSessionWithNotifications();
+        final streamedSnapshot = hostAdapter
+            .emitStreamedSessionWithNotifications();
         await sessionStore.waitForPendingPersistence();
 
         // Capture the initial payload after the streamed emission
@@ -678,12 +679,22 @@ void main() {
               'Notification ${original.id} not found after persistence',
             ),
           );
-          expect(persisted.isAcknowledged, original.isAcknowledged,
-              reason: 'Notification ${original.id} isAcknowledged must be preserved');
-          expect(persisted.turnId, original.turnId,
-              reason: 'Notification ${original.id} turnId must be preserved');
-          expect(persisted.transition, original.transition,
-              reason: 'Notification ${original.id} transition must be preserved');
+          expect(
+            persisted.isAcknowledged,
+            original.isAcknowledged,
+            reason:
+                'Notification ${original.id} isAcknowledged must be preserved',
+          );
+          expect(
+            persisted.turnId,
+            original.turnId,
+            reason: 'Notification ${original.id} turnId must be preserved',
+          );
+          expect(
+            persisted.transition,
+            original.transition,
+            reason: 'Notification ${original.id} transition must be preserved',
+          );
         }
       },
     );
@@ -1253,7 +1264,8 @@ final class _MultiEmittingInMemoryHostAdapter implements HostService {
     required String submittedText,
   }) {
     final session = _sessions[sessionId]!;
-    final turnNumber = session.promptThread.turns
+    final turnNumber =
+        session.promptThread.turns
             .where((t) => t.clientId == client.id)
             .length +
         1;

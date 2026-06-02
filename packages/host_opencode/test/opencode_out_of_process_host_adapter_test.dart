@@ -31,7 +31,8 @@ void main() {
 
   group('OutOfProcessOpenCodeHostAdapter', () {
     group('AC1a: attach-to-existing code path', () {
-      test('connector succeeds on first try → createSession succeeds', () async {
+      test('connector succeeds on first try → createSession succeeds',
+          () async {
         // Arrange: connector that succeeds (host already running)
         final connector = _SucceedingOpenCodeHostConnector();
         final launcher = _AlwaysFailingOpenCodeHostLauncher();
@@ -57,7 +58,9 @@ void main() {
     });
 
     group('AC1b: launch-then-attach code path', () {
-      test('connector fails, launcher succeeds, retry succeeds → createSession succeeds', () async {
+      test(
+          'connector fails, launcher succeeds, retry succeeds → createSession succeeds',
+          () async {
         // Arrange: connector fails first time, succeeds second time; launcher succeeds
         final connector = _FailingThenSucceedingOpenCodeHostConnector();
         final launcher = _SucceedingOpenCodeHostLauncher();
@@ -77,13 +80,16 @@ void main() {
 
         // Assert
         expect(session.id, equals('test-session'));
-        expect(connector.connectCallCount, equals(2)); // First attempt failed, second succeeded
+        expect(connector.connectCallCount,
+            equals(2)); // First attempt failed, second succeeded
         expect(launcher.launchCalled, isTrue);
       });
     });
 
     group('AC2: failed-start code path', () {
-      test('connector fails, launcher fails → createSession throws HostServiceFailure', () async {
+      test(
+          'connector fails, launcher fails → createSession throws HostServiceFailure',
+          () async {
         // Arrange
         final connector = _AlwaysFailingOpenCodeHostConnector();
         final launcher = _AlwaysFailingOpenCodeHostLauncher();
@@ -114,7 +120,9 @@ void main() {
         expect(launcher.launchCalled, isTrue);
       });
 
-      test('connector fails, launcher succeeds, retry fails → createSession throws HostServiceFailure', () async {
+      test(
+          'connector fails, launcher succeeds, retry fails → createSession throws HostServiceFailure',
+          () async {
         // Arrange: connector fails first, launcher succeeds, but connector fails second time too
         final connector = _AlwaysFailingOpenCodeHostConnector();
         final launcher = _SucceedingOpenCodeHostLauncher();
@@ -149,7 +157,8 @@ void main() {
     });
 
     group('race condition: operations block until bootstrap settles', () {
-      test('createSession succeeds when bootstrap completes before call', () async {
+      test('createSession succeeds when bootstrap completes before call',
+          () async {
         // Arrange: connector succeeds immediately (no slow bootstrap)
         final connector = _SucceedingOpenCodeHostConnector();
         final launcher = _AlwaysFailingOpenCodeHostLauncher();
@@ -172,7 +181,8 @@ void main() {
         expect(launcher.launchCalled, isFalse);
       });
 
-      test('createSession throws when called before bootstrapReady resolves', () async {
+      test('createSession throws when called before bootstrapReady resolves',
+          () async {
         // Arrange: connector that delays response (simulates slow bootstrap)
         final connector = _SlowOpenCodeHostConnector();
         final launcher = _SucceedingOpenCodeHostLauncher();
@@ -239,7 +249,8 @@ void main() {
         expect(updatedSession.activeTurn, isNotNull);
       });
 
-      test('OpenCode vocabulary does not leak above HostService boundary', () async {
+      test('OpenCode vocabulary does not leak above HostService boundary',
+          () async {
         final adapter = OutOfProcessOpenCodeHostAdapter(
           connector: const OpenCodeHostProcessConnector(),
           launcher: const OpenCodeHostProcessLauncher(),
@@ -361,7 +372,8 @@ final class _SucceedingOpenCodeHostConnector implements OpenCodeHostConnector {
 }
 
 /// Always fails on connect.
-final class _AlwaysFailingOpenCodeHostConnector implements OpenCodeHostConnector {
+final class _AlwaysFailingOpenCodeHostConnector
+    implements OpenCodeHostConnector {
   int connectCallCount = 0;
 
   @override
@@ -375,7 +387,8 @@ final class _AlwaysFailingOpenCodeHostConnector implements OpenCodeHostConnector
 }
 
 /// Fails first time, succeeds second time.
-final class _FailingThenSucceedingOpenCodeHostConnector implements OpenCodeHostConnector {
+final class _FailingThenSucceedingOpenCodeHostConnector
+    implements OpenCodeHostConnector {
   int connectCallCount = 0;
 
   @override
