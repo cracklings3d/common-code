@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:common_code_application/common_code_application.dart';
 import 'package:common_code_domain/common_code_domain.dart';
+import 'package:meta/meta.dart';
 
 import 'opencode_host_gateway.dart';
 import 'opencode_session_observation.dart';
@@ -33,6 +34,7 @@ enum OpenCodeSimulatedTurnTerminalOutcome { completed, failed }
 ///
 /// The adapter-local translation between CommonCode contracts and OpenCode-specific
 /// vocabulary is handled in [opencode_mapping.dart].
+@visibleForTesting
 final class OpenCodeHostAdapter implements HostService {
   OpenCodeHostAdapter({
     OpenCodeHostExecutionSimulationPolicy simulationPolicy =
