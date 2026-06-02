@@ -42,7 +42,9 @@ final class OutOfProcessOpenCodeHostAdapter implements HostService {
     required OpenCodeHostProcessConnector connector,
     required OpenCodeHostProcessLauncher launcher,
   })  : _connector = connector,
-        _launcher = launcher;
+        _launcher = launcher {
+    _bootstrap();
+  }
 
   final OpenCodeHostProcessConnector _connector;
   final OpenCodeHostProcessLauncher _launcher;
@@ -50,17 +52,15 @@ final class OutOfProcessOpenCodeHostAdapter implements HostService {
   final Map<String, StreamController<Session>> _sessionWatchControllersById =
       <String, StreamController<Session>>{};
 
-  /// Cached bootstrap future - computed once on first access.
-  Future<OpenCodeHostBootstrapOutcome>? _bootstrapFuture;
+  /// Cached bootstrap outcome - set once bootstrap completes.
+  OpenCodeHostBootstrapOutcome? _bootstrapOutcome;
+  bool _bootstrapStarted = false;
 
-  /// Triggers bootstrap and returns the cached future.
-  ///
-  /// Bootstrap sequence:
-  /// 1. Connect to already-running host
-  /// 2. If not found, launch then connect
-  /// 3. If both fail, record bounded failed-start
-  Future<OpenCodeHostBootstrapOutcome> _bootstrap() {
-    return _bootstrapFuture ??= _doBootstrap();
+  /// Triggers bootstrap and stores the result. Called eagerly from constructor.
+  Future<void> _bootstrap() async {
+    if (_bootstrapStarted) return;
+    _bootstrapStarted = true;
+    _bootstrapOutcome = await _doBootstrap();
   }
 
   Future<OpenCodeHostBootstrapOutcome> _doBootstrap() async {
@@ -105,10 +105,13 @@ final class OutOfProcessOpenCodeHostAdapter implements HostService {
   }
 
   /// Ensures bootstrap has succeeded or throws if it failed.
-  Future<void> _ensureBootstrap() async {
-    final outcome = await _bootstrap();
-
-    if (outcome case OpenCodeHostBoundedFailedStart(:final failure)) {
+  /// Called by session operations that require an active host connection.
+  void _ensureBootstrap() {
+    if (_bootstrapOutcome == null) {
+      // Bootstrap hasn't completed yet — proceed optimistically.
+      return;
+    }
+    if (_bootstrapOutcome case OpenCodeHostBoundedFailedStart(:final failure)) {
       throw HostServiceFailure(
         HostServiceFailureCode.unknownSessionId,
         'OpenCode host failed to start: ${failure.reason}',
@@ -166,6 +169,8 @@ final class OutOfProcessOpenCodeHostAdapter implements HostService {
 
   @override
   Session createSession({required String sessionId, required Host activeHost}) {
+    _ensureBootstrap();
+
     if (_sessionsById.containsKey(sessionId)) {
       throw HostServiceFailure(
         HostServiceFailureCode.duplicateSessionId,
