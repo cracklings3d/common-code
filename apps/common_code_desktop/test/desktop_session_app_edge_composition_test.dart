@@ -262,7 +262,7 @@ void main() {
     );
 
     test(
-      'source-structure regression guard: default facade path uses host_in_memory package types',
+      'source-structure regression guard: default facade path uses host_opencode package types',
       () async {
         // Find source files relative to the test file location
         // Platform.script can point to a cached location, so we use testDir
@@ -283,67 +283,83 @@ void main() {
         final facadeAdaptersContent = await facadeAdaptersSrcFile
             .readAsString();
 
-        // Assert the default facade path imports the host_in_memory package
+        // Assert the default facade path imports the host_opencode package
         expect(
           compositionContent,
-          contains("import 'package:host_in_memory/host_in_memory.dart'"),
+          contains("import 'package:host_opencode/host_opencode.dart'"),
           reason:
               'desktop_session_app_edge_composition.dart must import '
-              'package:host_in_memory/host_in_memory.dart to use the '
-              'Application-owned in-memory gateway and observation types.',
+              'package:host_opencode/host_opencode.dart to use the '
+              'OpenCode host adapter package.',
         );
 
         // Assert the default facade path composes the required types
+        // from the host_opencode package
         expect(
           compositionContent,
-          contains('PersistingHostServiceSessionMutations'),
+          contains('OpenCodeHostGateway'),
           reason:
-              'default facade must compose PersistingHostServiceSessionMutations '
-              'from the host_in_memory package.',
+              'default facade must compose OpenCodeHostGateway '
+              'from the host_opencode package.',
         );
         expect(
           compositionContent,
-          contains('PersistingHostServiceSessionObservation'),
+          contains('OpenCodePersistingHostServiceSessionObservation'),
           reason:
-              'default facade must compose PersistingHostServiceSessionObservation '
-              'from the host_in_memory package.',
+              'default facade must compose OpenCodePersistingHostServiceSessionObservation '
+              'from the host_opencode package.',
         );
         expect(
           compositionContent,
-          contains('HostServiceSessionObservation'),
+          contains('OpenCodeHostServiceSessionObservation'),
           reason:
-              'default facade must compose HostServiceSessionObservation '
-              'from the host_in_memory package.',
+              'default facade must compose OpenCodeHostServiceSessionObservation '
+              'from the host_opencode package.',
+        );
+        expect(
+          compositionContent,
+          contains('OpenCodeHostAdapter()'),
+          reason:
+              'default facade must use OpenCodeHostAdapter() '
+              'from the host_opencode package.',
         );
 
         // Assert desktop_session_facade_adapters.dart has NOT regained those types
         // (ownership boundary regression guard)
         expect(
           facadeAdaptersContent,
-          isNot(contains('PersistingHostServiceSessionMutations')),
+          isNot(contains('OpenCodeHostGateway')),
           reason:
               'desktop_session_facade_adapters.dart must not define '
-              'PersistingHostServiceSessionMutations - that type belongs to '
-              'the host_in_memory package.',
+              'OpenCodeHostGateway - that type belongs to '
+              'the host_opencode package.',
         );
         expect(
           facadeAdaptersContent,
-          isNot(contains('PersistingHostServiceSessionObservation')),
+          isNot(contains('OpenCodePersistingHostServiceSessionObservation')),
           reason:
               'desktop_session_facade_adapters.dart must not define '
-              'PersistingHostServiceSessionObservation - that type belongs to '
-              'the host_in_memory package.',
+              'OpenCodePersistingHostServiceSessionObservation - that type belongs to '
+              'the host_opencode package.',
         );
         expect(
           facadeAdaptersContent,
-          isNot(contains('HostServiceSessionObservation')),
+          isNot(contains('OpenCodeHostServiceSessionObservation')),
           reason:
               'desktop_session_facade_adapters.dart must not define '
-              'HostServiceSessionObservation - that type belongs to '
-              'the host_in_memory package.',
+              'OpenCodeHostServiceSessionObservation - that type belongs to '
+              'the host_opencode package.',
+        );
+        expect(
+          facadeAdaptersContent,
+          isNot(contains('OpenCodeHostAdapter')),
+          reason:
+              'desktop_session_facade_adapters.dart must not define '
+              'OpenCodeHostAdapter - that type belongs to '
+              'the host_opencode package.',
         );
 
-        // Assert the live desktop/in-memory path does NOT import host_core
+        // Assert the live desktop path does NOT import host_core
         // (HostService is now Application-owned via common_code_application)
         final runtimeSrcFile = File.fromUri(
           libSrcDirUri.resolve('desktop_session_runtime.dart'),
@@ -373,18 +389,18 @@ void main() {
               'HostService is now Application-owned via common_code_application.',
         );
 
-        // Assert host_in_memory source files do NOT import host_core directly
+        // Assert host_opencode source files do NOT import host_core directly
         // (they should use Application-owned HostService from common_code_application)
-        final hostInMemoryDir = testDir.parent.parent.uri.resolve(
-          'packages/host_in_memory/lib/src/',
+        final hostOpencodeDir = testDir.parent.parent.uri.resolve(
+          'packages/host_opencode/lib/src/',
         );
         for (final fileName in [
-          'in_memory_host_adapter.dart',
-          'in_memory_host_gateway.dart',
-          'in_memory_host_service.dart',
-          'in_memory_session_observation.dart',
+          'opencode_host_adapter.dart',
+          'opencode_host_gateway.dart',
+          'opencode_session_observation.dart',
+          'opencode_mapping.dart',
         ]) {
-          final srcFile = File.fromUri(hostInMemoryDir.resolve(fileName));
+          final srcFile = File.fromUri(hostOpencodeDir.resolve(fileName));
           if (await srcFile.exists()) {
             final srcContent = await srcFile.readAsString();
             expect(
@@ -395,6 +411,25 @@ void main() {
                   'it must use HostService from common_code_application.',
             );
           }
+        }
+
+        // Assert host_opencode package does not leak OpenCode-specific types
+        // to public contracts above the adapter boundary
+        final hostOpencodeLibFile = File.fromUri(
+          testDir.parent.parent.uri.resolve(
+            'packages/host_opencode/lib/host_opencode.dart',
+          ),
+        );
+        if (await hostOpencodeLibFile.exists()) {
+          final hostOpencodeContent = await hostOpencodeLibFile.readAsString();
+          // host_opencode.dart should NOT export internal src/ mapping helpers
+          expect(
+            hostOpencodeContent,
+            isNot(contains("export 'src/opencode_mapping.dart'")),
+            reason:
+                'host_opencode.dart must not export opencode_mapping.dart - '
+                'mapping helpers must stay internal to the adapter package.',
+          );
         }
       },
     );
