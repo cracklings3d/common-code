@@ -36,31 +36,44 @@ final class OpenCodeHostBoundedFailedStart extends OpenCodeHostBootstrapOutcome 
 /// - If no host found, launches via launcher then connects
 /// - If both fail, produces bounded failed-start outcome (no silent fallback to simulated adapter)
 ///
-/// Composes [OpenCodeHostProcessConnector] and [OpenCodeHostProcessLauncher] as dependencies.
+/// Composes [OpenCodeHostConnector] and [OpenCodeHostLauncher] as dependencies.
 final class OutOfProcessOpenCodeHostAdapter implements HostService {
   OutOfProcessOpenCodeHostAdapter({
-    required OpenCodeHostProcessConnector connector,
-    required OpenCodeHostProcessLauncher launcher,
-  })  : _connector = connector,
-        _launcher = launcher {
-    _bootstrap();
+    required OpenCodeHostConnector connector,
+    required OpenCodeHostLauncher launcher,
+  }) : _connector = connector,
+       _launcher = launcher {
+    _runBootstrap();
   }
 
-  final OpenCodeHostProcessConnector _connector;
-  final OpenCodeHostProcessLauncher _launcher;
+  final OpenCodeHostConnector _connector;
+  final OpenCodeHostLauncher _launcher;
   final Map<String, Session> _sessionsById = <String, Session>{};
   final Map<String, StreamController<Session>> _sessionWatchControllersById =
       <String, StreamController<Session>>{};
 
-  /// Cached bootstrap outcome - set once bootstrap completes.
+  /// Cached bootstrap outcome - set once bootstrap completes. Null while bootstrap is in progress.
   OpenCodeHostBootstrapOutcome? _bootstrapOutcome;
+
+  /// Whether bootstrap has been started (prevents re-entry).
   bool _bootstrapStarted = false;
 
+  /// Future that completes when bootstrap finishes. Exposed so callers and tests
+  /// can await bootstrap before performing session operations.
+  Future<void> _bootstrapFuture = Future<void>.value();
+
+  /// Future that completes when bootstrap finishes. Awaiting this guarantees
+  /// [createSession] and other HostService operations can proceed without
+  /// hitting the in-flight bootstrap guard.
+  Future<void> get bootstrapReady => _bootstrapFuture;
+
   /// Triggers bootstrap and stores the result. Called eagerly from constructor.
-  Future<void> _bootstrap() async {
+  void _runBootstrap() {
     if (_bootstrapStarted) return;
     _bootstrapStarted = true;
-    _bootstrapOutcome = await _doBootstrap();
+    _bootstrapFuture = _doBootstrap().then((outcome) {
+      _bootstrapOutcome = outcome;
+    });
   }
 
   Future<OpenCodeHostBootstrapOutcome> _doBootstrap() async {
@@ -104,12 +117,17 @@ final class OutOfProcessOpenCodeHostAdapter implements HostService {
     }
   }
 
-  /// Ensures bootstrap has succeeded or throws if it failed.
+  /// Ensures bootstrap has succeeded or throws if it failed or still in progress.
   /// Called by session operations that require an active host connection.
+  ///
+  /// Throws synchronously if bootstrap hasn't completed yet, preventing race
+  /// conditions where session operations could succeed before bootstrap settles.
   void _ensureBootstrap() {
     if (_bootstrapOutcome == null) {
-      // Bootstrap hasn't completed yet — proceed optimistically.
-      return;
+      throw HostServiceFailure(
+        HostServiceFailureCode.unknownSessionId,
+        'Host bootstrap is still in progress.',
+      );
     }
     if (_bootstrapOutcome case OpenCodeHostBoundedFailedStart(:final failure)) {
       throw HostServiceFailure(
