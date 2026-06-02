@@ -37,7 +37,11 @@ CommonCodeSessionFacade createDesktopSessionFacade({
         durableStorage: durableStorage,
       );
   final effectiveHostService =
-      (hostService as HostService?) ?? (OpenCodeHostAdapter() as HostService);
+      (hostService as HostService?) ??
+      (OutOfProcessOpenCodeHostAdapter(
+        connector: const OpenCodeHostProcessConnector(),
+        launcher: const OpenCodeHostProcessLauncher(),
+      ) as HostService);
   final effectiveBootstrapPort =
       (bootstrapPort as CommonCodeSessionBootstrapPort?) ??
       CommonCodeSessionBootstrapPortAdapter(
@@ -138,7 +142,11 @@ HostDesktopSessionRuntime createDesktopSessionRuntime({
     diagnosticsSink,
   );
   final effectiveHostService =
-      hostService ?? (OpenCodeHostAdapter() as HostService);
+      hostService ??
+      (OutOfProcessOpenCodeHostAdapter(
+        connector: const OpenCodeHostProcessConnector(),
+        launcher: const OpenCodeHostProcessLauncher(),
+      ) as HostService);
   final sessionStore = DurableLocalSessionStore.fromPersistenceComponents(
     legacySnapshotStore: effectiveSnapshotStore,
     durableStorage: durableStorage,

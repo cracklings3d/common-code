@@ -318,9 +318,9 @@ void main() {
         );
         expect(
           compositionContent,
-          contains('OpenCodeHostAdapter()'),
+          contains('OutOfProcessOpenCodeHostAdapter('),
           reason:
-              'default facade must use OpenCodeHostAdapter() '
+              'default facade must use OutOfProcessOpenCodeHostAdapter '
               'from the host_opencode package.',
         );
 
