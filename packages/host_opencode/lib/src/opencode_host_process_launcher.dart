@@ -40,14 +40,20 @@ final class OpenCodeHostProcessLaunchFailed
 /// Encapsulates logic to locate and spawn the machine-local OpenCode host binary.
 ///
 /// One-shot launch only - no watchdog, auto-restart, or service manager integration.
-final class OpenCodeHostProcessLauncher {
-  const OpenCodeHostProcessLauncher();
-
+abstract interface class OpenCodeHostLauncher {
   /// Locates the OpenCode host binary and spawns it.
   ///
   /// Returns [OpenCodeHostProcessLaunchSuccess] with process handle and connection endpoint on success.
   /// Returns [OpenCodeHostProcessLaunchFailed] when binary not found, permission denied,
   /// or process exits immediately.
+  Future<OpenCodeHostProcessLaunchOutcome> launch();
+}
+
+/// Concrete implementation of [OpenCodeHostLauncher] for production use.
+final class OpenCodeHostProcessLauncher implements OpenCodeHostLauncher {
+  const OpenCodeHostProcessLauncher();
+
+  @override
   Future<OpenCodeHostProcessLaunchOutcome> launch() async {
     // TODO: Implement actual binary location and spawning logic.
     // This is a placeholder that simulates a successful launch.

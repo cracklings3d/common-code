@@ -36,13 +36,19 @@ final class OpenCodeHostConnectionFailed extends OpenCodeHostConnectionOutcome {
 ///
 /// Returns connection handle on success.
 /// Returns structured failure when no host running or host unreachable.
-final class OpenCodeHostProcessConnector {
-  const OpenCodeHostProcessConnector();
-
+abstract interface class OpenCodeHostConnector {
   /// Attempts to connect to an already-running machine-local OpenCode host.
   ///
   /// Returns [OpenCodeHostConnectionSuccess] with connection handle if host is found and reachable.
   /// Returns [OpenCodeHostConnectionFailed] when no host is running or connection fails.
+  Future<OpenCodeHostConnectionOutcome> connect();
+}
+
+/// Concrete implementation of [OpenCodeHostConnector] for production use.
+final class OpenCodeHostProcessConnector implements OpenCodeHostConnector {
+  const OpenCodeHostProcessConnector();
+
+  @override
   Future<OpenCodeHostConnectionOutcome> connect() async {
     // TODO: Implement actual discovery and connection logic.
     // This is a placeholder that simulates no running host (typical case).

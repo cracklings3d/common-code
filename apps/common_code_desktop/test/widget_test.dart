@@ -21,12 +21,29 @@ void main() {
   });
 
   testWidgets(
-    'production bootstrap path renders a prompt thread conversation',
+    'data state renders a prompt thread conversation',
     (WidgetTester tester) async {
-      await tester.pumpWidget(CommonCodeDesktopApp());
+      // Note: this test verifies the UI rendering once a session is established.
+      // The real production bootstrap uses OutOfProcessOpenCodeHostAdapter which
+      // requires a running OpenCode host process; that integration scenario is
+      // exercised separately. Here we drive the UI into the data state via a
+      // fake controller, which is the same pattern used by the rest of these
+      // widget tests.
+      final completer = Completer<void>();
+      final controller = _FakeDesktopSessionController(
+        onInitialize: (controller) async {
+          await completer.future;
+          controller.emit(DesktopSessionControllerState.data(_buildSnapshot()));
+        },
+      );
+
+      await tester.pumpWidget(
+        CommonCodeDesktopApp(sessionController: controller),
+      );
 
       expect(find.text('Loading session...'), findsOneWidget);
 
+      completer.complete();
       await tester.pumpAndSettle();
 
       expect(find.text('Prompt Thread'), findsOneWidget);
