@@ -1,9 +1,7 @@
 import 'package:common_code_application/common_code_application.dart';
 import 'package:common_code_domain/common_code_domain.dart';
 
-
-import 'desktop_session_runtime.dart'
-    show desktopSessionRuntimeIdentityId;
+import 'desktop_session_runtime.dart' show desktopSessionRuntimeIdentityId;
 
 // Re-export domain types needed for presentation switch expressions.
 // This allows presentation files to use domain enums without directly importing the domain package.
@@ -92,7 +90,10 @@ final class SessionContextData {
 }
 
 /// Maps a domain [Session] to presentation-ready data structures.
-SessionContextData mapSessionToContextData(Session session, String attachedClientId) {
+SessionContextData mapSessionToContextData(
+  Session session,
+  String attachedClientId,
+) {
   final inputClientId = session.inputClient?.id;
   return SessionContextData(
     attachedClientId: attachedClientId,
@@ -116,7 +117,9 @@ List<TurnData> mapSessionToTurns(Session session) {
 }
 
 /// Maps a domain [Session] to unacknowledged [NotificationData] items.
-List<NotificationData> mapSessionToUnacknowledgedNotifications(Session session) {
+List<NotificationData> mapSessionToUnacknowledgedNotifications(
+  Session session,
+) {
   return [
     for (final notification in session.notifications)
       if (!notification.isAcknowledged)
@@ -181,7 +184,8 @@ final class DesktopSessionBootstrapDriver implements CommonCodeSessionDriver {
     // current desktop/in-memory path. Use it directly when available;
     // the null-coalesce fallback exists only for direct constructor
     // callers not going through the app-edge composition seam.
-    final request = _bootstrapRequest ??
+    final request =
+        _bootstrapRequest ??
         CommonCodeSessionBootstrapRequest(
           defaultSessionId: _defaultSessionId,
           hostId: _hostId,
@@ -232,7 +236,8 @@ final class DesktopSessionBootstrapDriver implements CommonCodeSessionDriver {
 /// This bridge translates the desktop-local mutation protocol onto the application
 /// [HostGateway] interface. The [HostService] is needed because [HostGateway] does not
 /// expose the acknowledgeNotification method.
-final class HostGatewayDesktopSessionMutationPort implements DesktopSessionMutationPort {
+final class HostGatewayDesktopSessionMutationPort
+    implements DesktopSessionMutationPort {
   const HostGatewayDesktopSessionMutationPort({
     required HostGateway hostGateway,
     required HostService hostService,

@@ -4,7 +4,6 @@ import 'package:common_code_application/common_code_application.dart';
 import 'package:common_code_domain/common_code_domain.dart';
 import 'package:flutter/foundation.dart';
 
-
 import 'package:common_code_persistence/common_code_persistence.dart';
 
 export 'desktop_session_runtime_constants.dart'
@@ -253,7 +252,8 @@ final class HostDesktopSessionRuntime implements DesktopSessionRuntime {
       // current desktop/in-memory path. Use it directly when available;
       // the null-coalesce fallback exists only for direct constructor
       // callers not going through the app-edge composition seam.
-      final request = _bootstrapRequest ??
+      final request =
+          _bootstrapRequest ??
           CommonCodeSessionBootstrapRequest(
             defaultSessionId: _defaultSessionId,
             hostId: _hostId,
@@ -281,7 +281,8 @@ final class HostDesktopSessionRuntime implements DesktopSessionRuntime {
         // Use the injected/request when available; the null-coalesce
         // fallback exists only for direct constructor callers not going
         // through the app-edge composition seam.
-        _currentBootstrapRequest = _bootstrapRequest ??
+        _currentBootstrapRequest =
+            _bootstrapRequest ??
             CommonCodeSessionBootstrapRequest(
               defaultSessionId: _defaultSessionId,
               hostId: _hostId,
@@ -299,7 +300,8 @@ final class HostDesktopSessionRuntime implements DesktopSessionRuntime {
     // Use the injected request when available; the null-coalesce fallback
     // exists only for direct constructor callers not going through the
     // app-edge composition seam.
-    final freshBootstrapRequest = _bootstrapRequest ??
+    final freshBootstrapRequest =
+        _bootstrapRequest ??
         CommonCodeSessionBootstrapRequest(
           defaultSessionId: _defaultSessionId,
           hostId: _hostId,

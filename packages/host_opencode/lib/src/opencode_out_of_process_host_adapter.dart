@@ -22,7 +22,8 @@ final class OpenCodeHostBootstrapSuccess extends OpenCodeHostBootstrapOutcome {
 }
 
 /// Failed bootstrap with bounded failure outcome.
-final class OpenCodeHostBoundedFailedStart extends OpenCodeHostBootstrapOutcome {
+final class OpenCodeHostBoundedFailedStart
+    extends OpenCodeHostBootstrapOutcome {
   OpenCodeHostBoundedFailedStart(this.failure);
 
   final OpenCodeHostStartFailure failure;
@@ -41,8 +42,8 @@ final class OutOfProcessOpenCodeHostAdapter implements HostService {
   OutOfProcessOpenCodeHostAdapter({
     required OpenCodeHostConnector connector,
     required OpenCodeHostLauncher launcher,
-  }) : _connector = connector,
-       _launcher = launcher {
+  })  : _connector = connector,
+        _launcher = launcher {
     _runBootstrap();
   }
 
